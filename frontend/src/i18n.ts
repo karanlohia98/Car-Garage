@@ -494,6 +494,15 @@ const MORE_ROWS: [string, string, string][] = [
   ['e.g. UPI: garage@upi', 'દા.ત. UPI: garage@upi', 'जैसे UPI: garage@upi'],
   ['e.g. +91 98250 12345', 'દા.ત. +91 98250 12345', 'जैसे +91 98250 12345'],
   ['Call {phone}', '{phone} પર ફોન કરો', '{phone} पर फ़ोन करें'],
+  ['Discount', 'છૂટ', 'छूट'],
+  ['Reason', 'કારણ', 'कारण'],
+  ['e.g. Regular customer', 'દા.ત. નિયમિત ગ્રાહક', 'जैसे नियमित ग्राहक'],
+  ['Call the customer', 'ગ્રાહકને ફોન કરો', 'ग्राहक को फ़ोन करें'],
+  ['Call the garage', 'ગેરેજને ફોન કરો', 'गैराज को फ़ोन करें'],
+  ['No phone number given. Use the chat.', 'ફોન નંબર આપ્યો નથી. ચેટ વાપરો.', 'फ़ोन नंबर नहीं दिया गया। चैट इस्तेमाल करें।'],
+  ['Mobile number (the garage may call or WhatsApp you)', 'મોબાઇલ નંબર (ગેરેજ તમને ફોન કે WhatsApp કરી શકે)', 'मोबाइल नंबर (गैराज आपको फ़ोन या WhatsApp कर सकता है)'],
+  ['Enter your mobile number so the garage can call you.', 'ગેરેજ તમને ફોન કરી શકે તે માટે તમારો મોબાઇલ નંબર લખો.', 'गैराज आपको फ़ोन कर सके इसके लिए अपना मोबाइल नंबर लिखें।'],
+  ['Enter a valid mobile number.', 'માન્ય મોબાઇલ નંબર લખો.', 'सही मोबाइल नंबर लिखें।'],
 ];
 
 const DICT: Record<string, { gu: string; hi: string }> = {};

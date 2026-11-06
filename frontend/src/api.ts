@@ -137,6 +137,9 @@ export interface JobCard {
   bookedTotal: number;
   /** Date (YYYY-MM-DD) the next service is due; the customer is reminded by WhatsApp a week before. */
   nextDue: string;
+  /** Flat amount the garage takes off the whole job. */
+  discount: number;
+  discountNote: string;
 }
 
 export interface JobCardInput {
@@ -146,6 +149,8 @@ export interface JobCardInput {
   checklist: CheckItem[];
   work: WorkLine[];
   nextDue: string;
+  discount: number;
+  discountNote: string;
 }
 
 export interface Photo { id: string; caption: string; at: string }
@@ -223,8 +228,8 @@ export interface BookingInput {
   serviceIds: string[];
   vehicle: string;
   plate: string;
-  /** Optional mobile number for WhatsApp updates. */
-  phone?: string;
+  /** Mobile number: the garage can call or WhatsApp it, and updates are sent to it. */
+  phone: string;
   date: string;
   time: string;
   notes: string;

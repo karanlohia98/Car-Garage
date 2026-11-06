@@ -88,7 +88,7 @@ export default function SitePage({ id }: { id: string }) {
           <p className="s-lead">{th.about || site.tagline}</p>
           <div className="site-hero-actions">
             <a className="site-btn" href={bookTarget}>{t('Book an appointment')}</a>
-            <a className="site-btn ghost" href={tel}>{tf('Call {phone}', { phone: site.phone })}</a>
+            <a className="site-btn ghost" href={tel}>{tf(t('Call {phone}'), { phone: site.phone })}</a>
           </div>
         </div>
       </section>
@@ -116,7 +116,7 @@ export default function SitePage({ id }: { id: string }) {
                   {sv.duration && <span className="s-muted"><FaClock /> {sv.duration}</span>}
                   {!toWebsite && p && p.price > 0 && (
                     <b>
-                      {sv.discount > 0 && <s className="s-muted">{money(p.price)}</s>} {tf('from {price}', { price: money(p.finalPrice) })}
+                      {sv.discount > 0 && <s className="s-muted">{money(p.price)}</s>} {tf(t('from {price}'), { price: money(p.finalPrice) })}
                     </b>
                   )}
                 </div>

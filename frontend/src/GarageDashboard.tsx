@@ -107,7 +107,7 @@ const DEFAULT_DURATION: Record<string, string> = {
   oil: '45 min', brakes: '1.5 hrs', tires: '45 min', battery: '30 min', ac: '1 hr',
   engine: '1 hr', align: '1 hr', inspection: '2 hrs', ev: '1.5 hrs', full: '3 hrs',
 };
-const DURATIONS = ['15 min', '30 min', '45 min', '1 hr', '1.5 hrs', '2 hrs', '3 hrs', 'Half a day', 'Full day'];
+const DURATIONS = ['15 min', '30 min', '45 min', '1 hr', '1.5 hrs', '2 hrs', '3 hrs', t('Half a day'), t('Full day')];
 
 /** Opening hours are picked from lists, then saved as one readable line: "Mon-Fri, 8:00 AM - 6:00 PM". */
 const composeHours = (days: string, open: string, close: string) => `${days}, ${open} - ${close}`;

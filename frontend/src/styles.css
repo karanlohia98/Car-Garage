@@ -547,3 +547,19 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 
 .lang-pick { border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; background: #1d2026; color: #f3f4f6; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; color-scheme: dark; }
 .lang-pick option { background: #1d2026; color: #f3f4f6; }
+
+/* Call buttons and job discount */
+.head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.call-row .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: .9rem; }
+.job-discount { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 8px 0; }
+.job-discount label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
+.job-discount input { max-width: 180px; }
+.quick-disc { display: flex; gap: 4px; }
+
+/* Call buttons and job discount */
+.head-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.call-row .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: .9rem; }
+.job-discount { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin: 8px 0; }
+.job-discount label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
+.job-discount input { max-width: 180px; }
+.quick-disc { display: flex; gap: 4px; }

@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { FaCar, FaClock, FaMapMarkerAlt, FaPaperPlane, FaPhoneAlt } from 'react-icons/fa';
 import * as api from './api';
 import type { ApptDetail, ApptStatus, ApptSummary, GarageDetail } from './api';
-import { money, waLink } from './config';
+import { cfg, money, waLink } from './config';
 import { t, tf, tMessage } from './i18n';
 
 /** The happy path, in order. requested / declined / cancelled sit outside it. */
@@ -135,6 +135,8 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
   const [fuel, setFuel] = useState(c.fuel);
   const [tech, setTech] = useState(c.technician);
   const [nextDue, setNextDue] = useState(c.nextDue);
+  const [discount, setDiscount] = useState(c.discount ? String(c.discount) : '');
+  const [discNote, setDiscNote] = useState(c.discountNote);
   const [checks, setChecks] = useState<Record<string, { state: api.CheckState; note: string }>>(() =>
     Object.fromEntries(d.cardItems.map((i) => {
       const found = c.checklist.find((x) => x.item === i);
@@ -146,6 +148,7 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const lines: api.WorkLine[] = editable ? work : c.work;
   const extra = work.reduce((n, w) => n + (Number(w.qty) || 0) * (Number(w.unit) || 0), 0);
   const run = async (fn: () => Promise<{ appointment: ApptDetail }>, ok?: () => void) => {
     setBusy(true);
@@ -168,6 +171,8 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
           fuel,
           technician: tech.trim(),
           nextDue,
+          discount: Number(discount) || 0,
+          discountNote: discNote.trim(),
           checklist: d.cardItems.map((i) => ({ item: i, state: checks[i].state, note: checks[i].note.trim() })),
           work: work.map((w) => ({ ...w, text: w.text.trim(), qty: Number(w.qty), unit: Number(w.unit) })),
         }),
@@ -251,14 +256,14 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       <PhotoSection d={d} onUpdate={onUpdate} onError={onError} />
 
       <h5>{t('Extra parts and labour')}</h5>
-      {work.length === 0 && !editable && <p className="muted">{t('No extra work.')}</p>}
-      {work.length > 0 && (
+      {lines.length === 0 && !editable && <p className="muted">{t('No extra work.')}</p>}
+      {lines.length > 0 && (
         <table className="job-work">
           <thead>
             <tr><th>{t('Item')}</th><th>{t('Qty')}</th><th>{t('Each')}</th><th>{t('Total')}</th>{editable && <th />}</tr>
           </thead>
           <tbody>
-            {work.map((w, i) => (
+            {lines.map((w, i) => (
               <tr key={i}>
                 <td>
                   {editable ? (
@@ -297,8 +302,28 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       <div className="job-totals">
         <span>{t('Booked services')} <b>{money(c.bookedTotal)}</b></span>
         <span>{t('Extra work')} <b>{money(editable ? extra : c.extraTotal)}</b></span>
-        <span className="grand">{t('Total')} <b>{money(c.bookedTotal + (editable ? extra : c.extraTotal))}</b></span>
+        {(editable ? Number(discount) || 0 : c.discount) > 0 && (
+          <span>{t('Discount')}{!editable && c.discountNote ? ` (${c.discountNote})` : ''} <b>-{money(editable ? Number(discount) || 0 : c.discount)}</b></span>
+        )}
+        <span className="grand">{t('Total')} <b>{money(Math.max(0, c.bookedTotal + (editable ? extra : c.extraTotal) - (editable ? Number(discount) || 0 : c.discount)))}</b></span>
       </div>
+      {editable && (
+        <div className="job-discount no-print">
+          <label>
+            {t('Discount')} ({cfg.currency})
+            <input inputMode="numeric" value={discount} placeholder="0" onChange={(e) => { setSaved(false); setDiscount(e.target.value.replace(/\D/g, '').slice(0, 6)); }} />
+          </label>
+          <label>
+            {t('Reason')} <small>{t('(optional)')}</small>
+            <input value={discNote} maxLength={40} placeholder={t('e.g. Regular customer')} onChange={(e) => { setSaved(false); setDiscNote(e.target.value); }} />
+          </label>
+          <span className="quick-disc">
+            {[5, 10, 15].map((pct) => (
+              <button type="button" key={pct} className="btn btn-ghost" onClick={() => { setSaved(false); setDiscount(String(Math.round(((c.bookedTotal + extra) * pct) / 100))); }}>{pct}%</button>
+            ))}
+          </span>
+        </div>
+      )}
 
       {c.work.length > 0 && (
         <div className={`estimate est-${est}`}>
@@ -352,7 +377,7 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
   const label = (m: string) => api.PAY_LABELS[m as api.PayMethod] ?? m;
   return (
     <div className="pay-box" aria-label={t('Payment')}>
-      <h4>{t('Payment')} {d.total > 0 && <small>{tf('(estimated total: from {price})', { price: money(d.total) })}</small>}</h4>
+      <h4>{t('Payment')} {d.total > 0 && <small>{tf(t('(estimated total: from {price})'), { price: money(d.total) })}</small>}</h4>
       {d.payStatus === 'paid' ? (
         <p className="pay-done">Paid{d.payMethod ? ` by ${label(d.payMethod).toLowerCase()}` : ''}. Thank you!</p>
       ) : isGarage ? (
@@ -593,7 +618,18 @@ export function AppointmentPanel(props: {
             <FaCar /> {d.vehicle}{d.plate ? ` (${d.plate})` : ''} &middot; <FaClock /> {formatWhen(d.date, d.time)}
           </p>
         </div>
-        <StatusBadge status={d.status} label={d.statusLabel} />
+        <div className="head-actions">
+          <StatusBadge status={d.status} label={d.statusLabel} />
+          {(isGarage ? d.customerPhone : d.garagePhone) ? (
+            <span className="call-row no-print">
+              <a className="btn btn-outline" href={`tel:${(isGarage ? d.customerPhone : d.garagePhone).replace(/[^\d+]/g, '')}`}>
+                <FaPhoneAlt /> {isGarage ? t('Call the customer') : t('Call the garage')}
+              </a>
+            </span>
+          ) : (
+            isGarage && <span className="muted no-print">{t('No phone number given. Use the chat.')}</span>
+          )}
+        </div>
       </div>
 
       <Stepper status={d.status} />
@@ -604,10 +640,10 @@ export function AppointmentPanel(props: {
           {d.services.map((s) => (
             <span className="fact-line" key={s.name}>
               {s.name}
-              {s.price > 0 && <b> {tf('from {price}', { price: money(s.price) })}</b>}
+              {s.price > 0 && <b> {tf(t('from {price}'), { price: money(s.price) })}</b>}
             </span>
           ))}
-          {d.total > 0 && <span className="fact-line total">{tf('Estimated total: from {price}', { price: money(d.total) })}</span>}
+          {d.total > 0 && <span className="fact-line total">{tf(t('Estimated total: from {price}'), { price: money(d.total) })}</span>}
         </dd>
         {d.notes && (
           <>
@@ -659,7 +695,7 @@ export function AppointmentPanel(props: {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={200}
-                placeholder={tf('e.g. Front pads are worn, +{price}. OK to go ahead?', { price: money(900) })}
+                placeholder={tf(t('e.g. Front pads are worn, +{price}. OK to go ahead?'), { price: money(900) })}
               />
             </label>
           )}
@@ -888,10 +924,11 @@ export function BookingForm(props: {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (picked.length === 0) return setError('Choose at least one service.');
-    if (vehicle.trim().length < 2) return setError('Enter your car make and model.');
-    if (!/^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$/.test(plate.trim())) return setError('Enter your number plate (letters and numbers only).');
-    if (!date) return setError('Choose a date.');
+    if (picked.length === 0) return setError(t('Choose at least one service.'));
+    if (vehicle.trim().length < 2) return setError(t('Enter your car make and model.'));
+    if (!/^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$/.test(plate.trim())) return setError(t('Enter your number plate (letters and numbers only).'));
+    if (phone.replace(/\D/g, '').length < 10) return setError(t('Enter your mobile number so the garage can call you.'));
+    if (!date) return setError(t('Choose a date.'));
     setBusy(true);
     try {
       const r = await api.bookAppointment({
@@ -940,7 +977,7 @@ export function BookingForm(props: {
                 {s.name}
                 {garage.mode === 'listing' && s.price > 0 && (
                   <b>
-                    {' '}{tf('from {price}', { price: money(s.finalPrice) })}
+                    {' '}{tf(t('from {price}'), { price: money(s.finalPrice) })}
                     {s.discount > 0 && <> ({s.discount}% off)</>}
                   </b>
                 )}
@@ -967,7 +1004,7 @@ export function BookingForm(props: {
         </label>
       </div>
       <label>
-        {t('Mobile number (optional, for WhatsApp updates)')}
+        {t('Mobile number (the garage may call or WhatsApp you)')}
         <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9+() -]/g, '').slice(0, 20))} placeholder={t('e.g. 98765 43210')} autoComplete="tel" />
       </label>
       <div className="two">

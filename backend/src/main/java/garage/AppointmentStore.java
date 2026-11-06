@@ -96,6 +96,8 @@ final class AppointmentStore {
         String updatedAt = "";
         String nextDue = "";      // date the next service is due (YYYY-MM-DD), "" = none
         boolean reminded;         // the customer was already reminded about nextDue
+        int discount;             // flat amount the garage takes off the whole job
+        String discountNote = "";
     }
 
     static final List<String> CHECK_ITEMS = List.of("Brakes", "Tires", "Lights", "Battery", "Fluids", "Wipers", "Suspension", "Engine bay");
@@ -201,8 +203,10 @@ final class AppointmentStore {
         }
         String notes = text(b, "notes", "Note for the garage", 0, 120, false, false);
         String phone = text(b, "phone", "Mobile number", 0, 20, false, false);
-        if (!phone.isEmpty() && (!phone.matches("[+0-9 ()-]{7,20}") || (notifier != null && notifier.normalize(phone).isEmpty()))) {
-            throw new GarageStore.Invalid("Enter a valid mobile number, or leave it empty.");
+        if (phone.isEmpty()) throw new GarageStore.Invalid("Enter your mobile number so the garage can call you.");
+        if (!phone.matches("[+0-9 ()-]{7,20}") || phone.replaceAll("\\D", "").length() < 10
+                || (notifier != null && notifier.normalize(phone).isEmpty())) {
+            throw new GarageStore.Invalid("Enter a valid mobile number.");
         }
         String date = b.get("date") instanceof String s ? s.trim() : "";
         String time = b.get("time") instanceof String s ? s.trim() : "";
@@ -371,12 +375,24 @@ final class AppointmentStore {
             }
         }
         c.nextDue = due;
+        double disc = b.get("discount") instanceof Number n ? n.doubleValue() : 0;
+        if (disc != Math.rint(disc) || disc < 0 || disc > GarageStore.MAX_PRICE) throw new GarageStore.Invalid("Discount must be a whole number from 0 to " + GarageStore.MAX_PRICE + ".");
+        c.discount = (int) disc;
+        c.discountNote = text(b, "discountNote", "Discount note", 0, 40, false, false);
         Card old = a.card;
         c.reminded = old != null && old.reminded && old.nextDue.equals(due);
         c.estimate = old == null ? "none" : old.estimate;
         c.estimateTotal = old == null ? 0 : old.estimateTotal;
         int newExtra = 0;
         for (Work w : c.work) newExtra += w.qty() * w.unit();
+        int booked = 0;
+        for (Line l : a.services) booked += l.price();
+        if (c.discount > booked + newExtra) throw new GarageStore.Invalid("The discount can't be more than the total (" + cur() + (booked + newExtra) + ").");
+        int oldDiscount = old == null ? 0 : old.discount;
+        if (c.discount != oldDiscount) {
+            addMessage(a, "system", c.discount == 0 ? "The discount was removed."
+                    : "Discount of " + cur() + c.discount + " applied" + (c.discountNote.isEmpty() ? "." : ": " + c.discountNote), role);
+        }
         if (!c.estimate.equals("none") && newExtra != c.estimateTotal) {
             c.estimate = "none"; // changed after it was sent: must be sent again
             addMessage(a, "system", "Extra work was changed, so the estimate needs to be sent for approval again.", role);
@@ -434,7 +450,8 @@ final class AppointmentStore {
                 "technician", c == null ? "" : c.technician, "checklist", checks, "work", work,
                 "estimate", c == null ? "none" : c.estimate, "estimateTotal", c == null ? 0 : c.estimateTotal,
                 "extraTotal", extraTotal(a), "bookedTotal", booked, "exists", c != null,
-                "nextDue", c == null ? "" : c.nextDue);
+                "nextDue", c == null ? "" : c.nextDue,
+                "discount", c == null ? 0 : c.discount, "discountNote", c == null ? "" : c.discountNote);
     }
 
     // ---------- payment and reviews ----------
@@ -674,7 +691,8 @@ final class AppointmentStore {
     private static int total(Appt a) {
         int t = 0;
         for (Line l : a.services) t += l.price();
-        return t + extraTotal(a);
+        t += extraTotal(a);
+        return Math.max(0, t - (a.card == null ? 0 : a.card.discount));
     }
 
     private static int extraTotal(Appt a) {
@@ -731,7 +749,7 @@ final class AppointmentStore {
         for (Work w : c.work) work.add(Json.obj("kind", w.kind(), "text", w.text(), "qty", w.qty(), "unit", w.unit()));
         return Json.obj("odometer", c.odometer, "fuel", c.fuel, "technician", c.technician, "checks", checks, "work", work,
                 "estimate", c.estimate, "estimateTotal", c.estimateTotal, "updatedAt", c.updatedAt,
-                "nextDue", c.nextDue, "reminded", c.reminded);
+                "nextDue", c.nextDue, "reminded", c.reminded, "discount", c.discount, "discountNote", c.discountNote);
     }
 
     @SuppressWarnings("unchecked")
@@ -753,6 +771,8 @@ final class AppointmentStore {
         c.updatedAt = (String) m.getOrDefault("updatedAt", "");
         c.nextDue = (String) m.getOrDefault("nextDue", "");
         c.reminded = Boolean.TRUE.equals(m.get("reminded"));
+        c.discount = ((Number) m.getOrDefault("discount", 0)).intValue();
+        c.discountNote = (String) m.getOrDefault("discountNote", "");
         return c;
     }
 
