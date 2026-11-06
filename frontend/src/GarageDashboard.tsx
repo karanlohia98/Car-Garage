@@ -9,7 +9,7 @@ import {
   FaTrash,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { CatalogItem, GarageInput, OwnerGarage, PricingMode, Theme, User } from './api';
+import type { CatalogItem, GarageInput, OwnerGarage, PayInfo, PayMethod, PricingMode, Theme, User } from './api';
 import { AppointmentsWorkspace } from './Appointments';
 import { fullAddress, iconFor, isCustomService, isHttpUrl } from './shared';
 import { themeVars } from './SitePage';
@@ -20,6 +20,8 @@ interface ServiceRow {
   name: string;
   description: string;
   price: string;
+  /** Percent off, as typed. Empty = no discount. */
+  discount: string;
   duration: string;
 }
 
@@ -35,11 +37,12 @@ interface Answers {
   mode: PricingMode | '';
   website: string;
   theme: Theme;
+  pay: PayInfo;
   services: ServiceRow[];
 }
 
 const EMPTY: Answers = {
-  name: '', city: '', area: '', zip: '', address: '', phone: '', hours: '', tagline: '', mode: '', website: '', theme: api.DEFAULT_THEME, services: [],
+  name: '', city: '', area: '', zip: '', address: '', phone: '', hours: '', tagline: '', mode: '', website: '', theme: api.DEFAULT_THEME, pay: { methods: ['card', 'cash'], link: '', note: '' }, services: [],
 };
 
 let rowCounter = 0;
@@ -57,12 +60,14 @@ const fromGarage = (g: OwnerGarage): Answers => ({
   mode: g.mode,
   website: g.website,
   theme: g.theme ?? api.DEFAULT_THEME,
+  pay: g.pay ?? { methods: ['card', 'cash'], link: '', note: '' },
   services: g.services.map((s) => ({
     key: nextKey(),
     id: isCustomService(s.id) ? '' : s.id,
     name: s.name,
     description: s.description,
     price: s.price ? String(s.price) : '',
+    discount: s.discount ? String(s.discount) : '',
     duration: s.duration,
   })),
 });
@@ -80,10 +85,12 @@ const toInput = (a: Answers, published: boolean): GarageInput => ({
   website: a.website,
   published,
   theme: a.theme,
+  pay: a.pay,
   services: a.services.map((s) => {
-    const base = { id: s.id, duration: s.duration };
+    const base = { id: s.id, duration: s.duration, description: s.description.trim() };
     const price = a.mode === 'listing' && s.price.trim() !== '' ? Number(s.price) : undefined;
-    return s.id ? { ...base, price } : { ...base, name: s.name, description: s.description, price };
+    const discount = a.mode === 'listing' && s.discount.trim() !== '' ? Number(s.discount) : 0;
+    return s.id ? { ...base, price, discount } : { ...base, name: s.name, price, discount };
   }),
 });
 
@@ -93,6 +100,11 @@ const TIMES = Array.from({ length: 29 }, (_, i) => {
   const h = Math.floor(mins / 60);
   return `${h % 12 === 0 ? 12 : h % 12}:${mins % 60 === 0 ? '00' : '30'} ${h < 12 ? 'AM' : 'PM'}`;
 });
+/** Typical time for each standard service, used as the starting value when a garage ticks it. */
+const DEFAULT_DURATION: Record<string, string> = {
+  oil: '45 min', brakes: '1.5 hrs', tires: '45 min', battery: '30 min', ac: '1 hr',
+  engine: '1 hr', align: '1 hr', inspection: '2 hrs', ev: '1.5 hrs', full: '3 hrs',
+};
 const DURATIONS = ['15 min', '30 min', '45 min', '1 hr', '1.5 hrs', '2 hrs', '3 hrs', 'Half a day', 'Full day'];
 
 /** Opening hours are picked from lists, then saved as one readable line: "Mon-Fri, 8:00 AM - 6:00 PM". */
@@ -102,14 +114,15 @@ const parseHours = (h: string): { days: string; open: string; close: string } | 
   return m && DAY_OPTIONS.includes(m[1]) && TIMES.includes(m[2]) && TIMES.includes(m[3]) ? { days: m[1], open: m[2], close: m[3] } : null;
 };
 
-const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Your page', 'Review & publish'] as const;
+const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Payments', 'Your page', 'Review & publish'] as const;
 
 /** One-sentence explanation shown under each step heading. */
 const STEP_HELP = [
   'This is how your garage is named in the directory. Customers see your name first, so use the name on your sign.',
   'Drivers search by ZIP code, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.',
   'Pick one. You can switch later. Customers must be signed in to see prices either way.',
-  'Choose what you offer. Customers pick from this list when they book, so only tick services you can actually do.',
+  'Choose what you offer. Each service starts with a ready-made description and typical time that you can reword. Add a percentage off to promote a service.',
+  'Customers pay you directly. Tick how you accept payment; we track it so both sides know when a job is paid.',
   'Every garage gets its own web page you can share as your website. Choose how it looks; the preview updates as you go.',
   'Check everything below. New garages are reviewed by our team before they appear in the directory, usually within a day.',
 ] as const;
@@ -138,11 +151,18 @@ function validateStep(step: number, a: Answers): string | null {
         if (!s.id && s.name.trim().length < 2) return 'Give each custom service a name.';
         if (a.mode === 'listing') {
           const p = Number(s.price);
+          if (s.discount.trim() !== '' && (!Number.isInteger(Number(s.discount)) || Number(s.discount) < 1 || Number(s.discount) > 90)) {
+            return `Discount for ${s.name || 'a service'} must be 1 to 90 percent, or empty.`;
+          }
           if (s.price.trim() === '' || !Number.isInteger(p) || p < 1 || p > 10000) {
             return `Enter a whole-dollar price (1-10000) for ${s.id ? 'each catalog service' : s.name || 'each custom service'}.`;
           }
         }
       }
+      return null;
+    case 4:
+      if (a.pay.methods.length === 0) return 'Choose at least one way customers can pay.';
+      if (a.pay.methods.includes('online') && !isHttpUrl(a.pay.link.trim())) return 'Enter your online payment link, starting with https://';
       return null;
     default:
       return null;
@@ -346,7 +366,7 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
         {garage.services.map((s) => (
           <li key={s.id}>
             {iconFor(s.id)} {s.name}
-            {garage.mode === 'listing' && <b> ${s.price}</b>}
+            {garage.mode === 'listing' && <b> ${s.finalPrice}{s.discount > 0 && ` (${s.discount}% off)`}</b>}
           </li>
         ))}
       </ul>
@@ -394,14 +414,14 @@ function Wizard(props: {
   const toggleCatalog = (c: CatalogItem) => {
     setError(null);
     if (chosen.has(c.id)) set('services', a.services.filter((s) => s.id !== c.id));
-    else set('services', [...a.services, { key: nextKey(), id: c.id, name: c.name, description: c.description, price: '', duration: '' }]);
+    else set('services', [...a.services, { key: nextKey(), id: c.id, name: c.name, description: c.description, price: '', discount: '', duration: DEFAULT_DURATION[c.id] ?? '' }]);
   };
 
   const updateRow = (key: string, patch: Partial<ServiceRow>) =>
     set('services', a.services.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
   const addCustom = () =>
-    set('services', [...a.services, { key: nextKey(), id: '', name: '', description: '', price: '', duration: '' }]);
+    set('services', [...a.services, { key: nextKey(), id: '', name: '', description: '', price: '', discount: '', duration: '' }]);
 
   const next = () => {
     const msg = validateStep(step, a);
@@ -412,7 +432,7 @@ function Wizard(props: {
   };
 
   const save = async (publish: boolean) => {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const msg = validateStep(i, a);
       if (msg) {
         setStep(i);
@@ -609,17 +629,30 @@ function Wizard(props: {
                       )}
                     </div>
                     {a.mode === 'listing' && (
-                      <label className="money">
-                        <span>$</span>
-                        <input
-                          inputMode="numeric"
-                          value={s.price}
-                          onChange={(e) => updateRow(s.key, { price: e.target.value.replace(/[^\d]/g, '') })}
-                          placeholder="from"
-                          aria-label={`Price for ${s.name || 'custom service'}`}
-                          maxLength={5}
-                        />
-                      </label>
+                      <>
+                        <label className="money">
+                          <span>$</span>
+                          <input
+                            inputMode="numeric"
+                            value={s.price}
+                            onChange={(e) => updateRow(s.key, { price: e.target.value.replace(/[^\d]/g, '') })}
+                            placeholder="from"
+                            aria-label={`Price for ${s.name || 'custom service'}`}
+                            maxLength={5}
+                          />
+                        </label>
+                        <label className="money pct">
+                          <input
+                            inputMode="numeric"
+                            value={s.discount}
+                            onChange={(e) => updateRow(s.key, { discount: e.target.value.replace(/[^\d]/g, '').slice(0, 2) })}
+                            placeholder="off"
+                            aria-label={`Discount percent for ${s.name || 'custom service'}`}
+                            maxLength={2}
+                          />
+                          <span>% off</span>
+                        </label>
+                      </>
                     )}
                     <select
                       className="dur"
@@ -642,6 +675,14 @@ function Wizard(props: {
                         <FaTrash />
                       </button>
                     )}
+                    <input
+                      className="svc-desc"
+                      value={s.description}
+                      onChange={(e) => updateRow(s.key, { description: e.target.value })}
+                      placeholder="Describe this service in one line"
+                      aria-label={`Description for ${s.name || 'custom service'}`}
+                      maxLength={160}
+                    />
                   </div>
                 ))}
               </div>
@@ -653,6 +694,49 @@ function Wizard(props: {
         )}
 
         {step === 4 && (
+          <div className="qa">
+            <fieldset className="pay-methods">
+              <legend>How can customers pay you?</legend>
+              {(Object.keys(api.PAY_LABELS) as PayMethod[]).map((m) => (
+                <label key={m} className="check">
+                  <input
+                    type="checkbox"
+                    checked={a.pay.methods.includes(m)}
+                    onChange={(e) =>
+                      set('pay', { ...a.pay, methods: e.target.checked ? [...a.pay.methods, m] : a.pay.methods.filter((x) => x !== m) })
+                    }
+                  />
+                  {api.PAY_LABELS[m]}
+                </label>
+              ))}
+            </fieldset>
+            {a.pay.methods.includes('online') && (
+              <label>
+                Online payment link
+                <input
+                  type="url"
+                  value={a.pay.link}
+                  onChange={(e) => set('pay', { ...a.pay, link: e.target.value })}
+                  placeholder="https://pay.example.com/your-garage"
+                  maxLength={300}
+                />
+                <small className="hint">A payment page you already have, for example a Stripe, PayPal or Square payment link. Customers are sent there to pay you.</small>
+              </label>
+            )}
+            <label>
+              Payment note <small>(optional)</small>
+              <input
+                value={a.pay.note}
+                onChange={(e) => set('pay', { ...a.pay, note: e.target.value })}
+                maxLength={100}
+                placeholder="e.g. Zelle: 206 555 0142"
+              />
+              <small className="hint">Shown to the customer when they pay, for example transfer details.</small>
+            </label>
+          </div>
+        )}
+
+        {step === 5 && (
           <div className="qa">
             <div>
               <b>Colour</b>
@@ -719,7 +803,7 @@ function Wizard(props: {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="qa review">
             <dl>
               <dt>Garage</dt>
@@ -734,10 +818,12 @@ function Wizard(props: {
               </dd>
               <dt>Prices</dt>
               <dd>{a.mode === 'website' ? `Customers are sent to ${a.website}` : 'Listed here on Garage Hub'}</dd>
+              <dt>Payment</dt>
+              <dd>{a.pay.methods.map((m: PayMethod) => api.PAY_LABELS[m]).join(', ')}</dd>
               <dt>Services</dt>
               <dd>
                 {a.services
-                  .map((s) => `${s.name}${a.mode === 'listing' ? ` ($${s.price})` : ''}`)
+                  .map((s) => `${s.name}${a.mode === 'listing' ? ` ($${s.price}${s.discount ? `, ${s.discount}% off` : ''})` : ''}`)
                   .join(', ')}
               </dd>
             </dl>

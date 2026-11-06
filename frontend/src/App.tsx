@@ -48,7 +48,8 @@ const saveWhere = (w: Where | null): void => {
   }
 };
 
-export default function App() {
+/** One site, two front doors: drivers use `/`, garage owners use `/owners`. Each shows only its own options. */
+export default function App({ home }: { home: 'driver' | 'owner' }) {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState<boolean>(!!api.getToken());
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
@@ -98,7 +99,7 @@ export default function App() {
       setChecking(false);
       if (gid) {
         setPendingId(gid);
-        openAuth('login', 'driver');
+        openAuth('login');
       }
       return;
     }
@@ -106,6 +107,8 @@ export default function App() {
       .me()
       .then((r) => {
         setUser(r.user);
+        if (r.user.role === 'garage' && home === 'driver') return window.location.replace('/owners');
+        if (r.user.role === 'driver' && home === 'owner') return window.location.replace('/');
         if (r.user.role === 'garage') setView('garage');
         else if (gid) window.location.replace(`/g/${encodeURIComponent(gid)}`);
         if (wantBookings && r.user.role === 'driver') {
@@ -140,8 +143,8 @@ export default function App() {
     return () => clearInterval(t);
   }, [user, refreshUnread]);
 
-  const openAuth = (mode: AuthMode, intent: Intent = 'driver') => {
-    setAuthIntent(intent);
+  const openAuth = (mode: AuthMode) => {
+    setAuthIntent(home === 'owner' ? 'garage' : 'driver');
     setAuthMode(mode);
   };
 
@@ -159,17 +162,13 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  /** "Register my garage": garage owners have their own login, so drivers are signed out first. */
-  const startGarage = async () => {
-    if (user) await handleLogout();
-    openAuth('signup', 'garage');
-  };
-
   const handleAuthed = (token: string, u: User) => {
     api.setToken(token);
     setUser(u);
     setAuthMode(null);
     loadGarages();
+    if (u.role === 'garage' && home === 'driver') return void window.location.assign('/owners');
+    if (u.role === 'driver' && home === 'owner') return void window.location.assign('/');
     if (u.role === 'garage') {
       setPendingId(null);
       setView('garage');
@@ -204,8 +203,8 @@ export default function App() {
     setPendingId(null);
   };
 
-  const showGarageView = !!user && user.role === 'garage';
-  const showBookings = !!user && user.role === 'driver' && view === 'bookings';
+  const showGarageView = !!user && user.role === 'garage' && home === 'owner';
+  const showBookings = !!user && user.role === 'driver' && home === 'driver' && view === 'bookings';
   const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
   return (
@@ -213,6 +212,7 @@ export default function App() {
       <Header
         user={user}
         checking={checking}
+        home={home}
         view={view}
         unread={unread}
         onView={switchView}
@@ -244,6 +244,8 @@ export default function App() {
               />
             </div>
           </section>
+        ) : home === 'owner' ? (
+          <OwnerHome onAuth={openAuth} />
         ) : (
           <>
             <Hero user={user} onAuth={openAuth} />
@@ -258,13 +260,13 @@ export default function App() {
               onSelect={handleSelect}
             />
             <Process />
-            <ForGarages onStart={startGarage} onLogin={() => openAuth('login', 'garage')} />
           </>
         )}
       </main>
       <footer className="footer">
         <div className="wrap">
           <span>&copy; {new Date().getFullYear()} Garage Hub. All rights reserved.</span>
+          {home === 'driver' ? <a href="/owners">Own a garage? For garage owners</a> : <a href="/">Looking for a garage?</a>}
           <span>Demo site: sample garages, contact details and prices.</span>
         </div>
       </footer>
@@ -285,13 +287,14 @@ export default function App() {
 function Header(props: {
   user: User | null;
   checking: boolean;
+  home: 'driver' | 'owner';
   view: View;
   unread: Unread;
   onView: (v: View) => void;
-  onAuth: (m: AuthMode, intent?: Intent) => void;
+  onAuth: (m: AuthMode) => void;
   onLogout: () => void;
 }) {
-  const { user, checking, view, unread, onView, onAuth, onLogout } = props;
+  const { user, checking, home, view, unread, onView, onAuth, onLogout } = props;
   const garageView = !!user && user.role === 'garage';
   return (
     <header className="header">
@@ -308,9 +311,9 @@ function Header(props: {
         <nav className="nav" aria-label="Main">
           {!garageView && (
             <>
-              <a href="#garages">Garages</a>
+              {home === 'driver' ? <a href="#garages">Garages</a> : <a href="#benefits">Why Garage Hub</a>}
               <a href="#process">How it works</a>
-              {!user && <a href="#for-garages">For garages</a>}
+              {home === 'driver' ? <a href="/owners">For garage owners</a> : <a href="/">Find a garage</a>}
             </>
           )}
         </nav>
@@ -342,14 +345,11 @@ function Header(props: {
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => onAuth('login', 'garage')}>
-                Garage login
+              <button className="btn btn-ghost" onClick={() => onAuth('login')}>
+                {home === 'owner' ? 'Garage login' : 'Log in'}
               </button>
-              <button className="btn btn-ghost" onClick={() => onAuth('login', 'driver')}>
-                Driver login
-              </button>
-              <button className="btn btn-primary" onClick={() => onAuth('signup', 'driver')}>
-                Sign up
+              <button className="btn btn-primary" onClick={() => onAuth('signup')}>
+                {home === 'owner' ? 'Register my garage' : 'Sign up'}
               </button>
             </>
           )}
@@ -359,7 +359,7 @@ function Header(props: {
   );
 }
 
-function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode, intent?: Intent) => void }) {
+function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode) => void }) {
   return (
     <section id="top" className="hero">
       <div className="wrap hero-grid">
@@ -747,10 +747,10 @@ function GaragesSection(props: {
 
 function Process() {
   const steps = [
-    { n: '1', t: 'Create your account', d: 'Sign up free to unlock garage pricing.' },
-    { n: '2', t: 'Choose a garage', d: 'Search by name or area, or filter by the service you need.' },
-    { n: '3', t: 'Compare services & prices', d: 'See exactly what that garage offers and what it costs.' },
-    { n: '4', t: 'Call or drop in', d: 'Book directly with the garage using the details on its page.' },
+    { n: '1', t: 'Enter your ZIP', d: 'Share your location or type your ZIP code to see garages near you.' },
+    { n: '2', t: 'Choose a garage', d: 'Open its page, read its services and reviews, then sign in to see prices.' },
+    { n: '3', t: 'Book and chat', d: 'Pick a time, then follow the job and message the garage as it goes.' },
+    { n: '4', t: 'Collect, pay, review', d: 'Pick up your car, pay the garage, and rate your experience.' },
   ];
   return (
     <section id="process" className="section alt">
@@ -773,30 +773,83 @@ function Process() {
   );
 }
 
-function ForGarages(props: { onStart: () => void; onLogin: () => void }) {
-  const { onStart, onLogin } = props;
+/** Front page for garage owners: only garage options, no driver directory. */
+function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
+  const benefits = [
+    ['Your own web page', 'A page you can use as your website, with your colours, headline, services and hours.'],
+    ['Online bookings', 'Drivers book a time, you accept, and you chat with them about the job.'],
+    ['Clear job tracking', 'Booked, car at the garage, work in progress, completed, picked up. Customers see every step.'],
+    ['Offers and discounts', 'Put a percentage off on the services you want to promote.'],
+    ['Get paid your way', 'Accept cash, card at the garage, transfer, or send customers to your own payment link.'],
+    ['Reviews that build trust', 'Drivers rate you after the job, and your average shows on your page and in search.'],
+  ];
+  const steps = [
+    ['Register', 'Create a garage owner account.'],
+    ['Answer a few questions', 'Name, ZIP code, hours, services, prices and how you want your page to look.'],
+    ['We approve it', 'Our team checks new garages, usually within a day.'],
+    ['Go live', 'Drivers near your ZIP can find you and book.'],
+  ];
   return (
-    <section id="for-garages" className="section">
-      <div className="wrap for-garages">
-        <div>
-          <p className="eyebrow">Own a garage?</p>
-          <h2>Get listed in minutes</h2>
-          <p className="muted">
-            Garage owners have their own login, separate from drivers. Register, answer a few simple questions, tell us
-            your services and prices (or point customers to your own website), and once our team approves your garage it
-            appears in the directory. You also get your own web page you can use as your website.
-          </p>
+    <>
+      <section id="top" className="hero">
+        <div className="wrap hero-grid">
+          <div>
+            <p className="eyebrow">For garage owners</p>
+            <h1>
+              Your garage, online
+              <br />
+              <span className="accent">in minutes.</span>
+            </h1>
+            <p className="lead">
+              Get listed for drivers in your area, take bookings, keep customers updated and get paid, all from one
+              dashboard. Your garage also gets its own web page.
+            </p>
+            <div className="cta-row">
+              <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup')}>
+                Register my garage
+              </button>
+              <button className="btn btn-outline btn-lg" onClick={() => onAuth('login')}>
+                Garage login
+              </button>
+            </div>
+          </div>
+          <HeroArt />
         </div>
-        <div className="cta-row">
-          <button className="btn btn-primary btn-lg" onClick={onStart}>
-            Register my garage
-          </button>
-          <button className="btn btn-outline btn-lg" onClick={onLogin}>
-            Garage owner log in
-          </button>
+      </section>
+      <section id="benefits" className="section">
+        <div className="wrap">
+          <div className="section-head">
+            <p className="eyebrow">Why Garage Hub</p>
+            <h2>Everything a garage needs</h2>
+          </div>
+          <ul className="benefit-grid">
+            {benefits.map(([t, d]) => (
+              <li key={t}>
+                <h3>{t}</h3>
+                <p className="muted">{d}</p>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
-    </section>
+      </section>
+      <section id="process" className="section alt">
+        <div className="wrap">
+          <div className="section-head">
+            <p className="eyebrow">How it works</p>
+            <h2>Live in four steps</h2>
+          </div>
+          <ol className="steps">
+            {steps.map(([t, d], i) => (
+              <li key={t}>
+                <span className="step-n">{i + 1}</span>
+                <h3>{t}</h3>
+                <p>{d}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -809,7 +862,7 @@ function AuthModal(props: {
   onAuthed: (token: string, user: User) => void;
 }) {
   const { mode, intent, pendingName, onMode, onClose, onAuthed } = props;
-  const [role, setRole] = useState<api.Role>(intent);
+  const role: api.Role = intent; // fixed by which front door the visitor used
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -856,16 +909,9 @@ function AuthModal(props: {
           &times;
         </button>
         <h2 id="auth-title">{isSignup ? (isGarage ? 'Register your garage' : 'Create your account') : 'Welcome back'}</h2>
-        <div className="seg role-seg" role="group" aria-label="Account type">
-          {(['driver', 'garage'] as const).map((r) => (
-            <button type="button" key={r} className={role === r ? 'on' : ''} aria-pressed={role === r} onClick={() => setRole(r)}>
-              {r === 'driver' ? 'Driver' : 'Garage owner'}
-            </button>
-          ))}
-        </div>
         <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
         <p className="one-account">
-          {isGarage ? 'Garage owner accounts are separate from driver accounts.' : 'Driver accounts are separate from garage owner accounts.'}
+          {isGarage ? 'This is the garage owner login. Looking for a garage? Use the driver site.' : 'This is the driver login. Own a garage? Use the garage owner site.'}
         </p>
         <form onSubmit={submit} noValidate>
           {isSignup && (

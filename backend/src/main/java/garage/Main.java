@@ -58,7 +58,7 @@ public final class Main {
         server.createContext("/api/my/garage", ex -> handle(ex, () -> myGarage(ex, store, garageStore)));
         server.createContext("/api/my/appointments", ex -> handle(ex, () -> garageAppointments(ex, store, garageStore, appointments)));
         server.createContext("/api/appointments", ex -> handle(ex, () -> appointmentsApi(ex, store, garageStore, appointments)));
-        server.createContext("/api/sites", ex -> handle(ex, () -> site(ex, store, garageStore)));
+        server.createContext("/api/sites", ex -> handle(ex, () -> site(ex, store, garageStore, appointments)));
         server.createContext("/api/admin", ex -> handle(ex, () -> adminApi(ex, admin, garageStore)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
@@ -208,6 +208,12 @@ public final class Main {
         } else if (parts.length == 2 && parts[1].equals("messages")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("payment")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.pay(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("review")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.review(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
         } else if (parts.length == 2 && parts[1].equals("status")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.changeStatus(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
@@ -250,12 +256,13 @@ public final class Main {
     }
 
     /** GET /api/sites/{id}: public page data for one garage's own site (no prices). */
-    private static void site(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
+    private static void site(HttpExchange ex, UserStore store, GarageStore garageStore, AppointmentStore appts) throws Exception {
         if (!method(ex, "GET")) return;
         String id = ex.getRequestURI().getPath().substring("/api/sites".length()).replaceAll("^/|/$", "");
         UserStore.User u = store.userForToken(bearer(ex));
         Map<String, Object> g = garageStore.siteFor(id, u == null ? null : u.email());
         if (g == null) { error(ex, 404, "Garage not found."); return; }
+        g.put("reviewList", appts.reviewsFor(id, 10));
         send(ex, 200, Json.write(Json.obj("garage", g)));
     }
 

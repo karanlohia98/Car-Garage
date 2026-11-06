@@ -9,6 +9,7 @@ const STEPS: { status: ApptStatus; label: string }[] = [
   { status: 'at_garage', label: 'Car at the garage' },
   { status: 'in_progress', label: 'Work in progress' },
   { status: 'completed', label: 'Work completed' },
+  { status: 'picked_up', label: 'Car picked up' },
 ];
 
 const GARAGE_BUTTON: Record<string, string> = {
@@ -17,9 +18,10 @@ const GARAGE_BUTTON: Record<string, string> = {
   at_garage: 'Car has arrived at the garage',
   in_progress: 'Start the work',
   completed: 'Mark work completed',
+  picked_up: 'Car handed back to the owner',
   cancelled: 'Cancel appointment',
 };
-const CUSTOMER_BUTTON: Record<string, string> = { cancelled: 'Cancel my appointment' };
+const CUSTOMER_BUTTON: Record<string, string> = { cancelled: 'Cancel my appointment', picked_up: 'I picked up my car' };
 const DANGER = new Set<string>(['declined', 'cancelled']);
 
 const localToday = (): string => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -35,6 +37,117 @@ const formatStamp = (iso: string): string => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
+
+const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
+
+/** Tracks payment. Money goes directly to the garage; the driver reports it and the garage confirms it. */
+function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; onError: (e: unknown) => void }) {
+  const { d, onUpdate, onError } = props;
+  const isGarage = d.role === 'garage';
+  const methods = d.garagePay?.methods ?? [];
+  const [method, setMethod] = useState<string>(d.payMethod || methods[0] || 'cash');
+  const [busy, setBusy] = useState(false);
+  const run = async (action: 'report' | 'confirm') => {
+    setBusy(true);
+    try {
+      onUpdate((await api.payAppointment(d.id, action, method)).appointment);
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = (m: string) => api.PAY_LABELS[m as api.PayMethod] ?? m;
+  return (
+    <div className="pay-box" aria-label="Payment">
+      <h4>Payment {d.total > 0 && <small>(estimated total: from ${d.total})</small>}</h4>
+      {d.payStatus === 'paid' ? (
+        <p className="pay-done">Paid{d.payMethod ? ` by ${label(d.payMethod).toLowerCase()}` : ''}. Thank you!</p>
+      ) : isGarage ? (
+        <>
+          <p className="muted">
+            {d.payStatus === 'reported' ? `The customer says they paid by ${label(d.payMethod).toLowerCase()}.` : 'Waiting for the customer to pay.'}
+          </p>
+          {d.payStatus !== 'reported' && (
+            <label>
+              Paid by
+              <select value={method} onChange={(e) => setMethod(e.target.value)}>
+                {(Object.keys(api.PAY_LABELS) as api.PayMethod[]).map((m) => <option key={m} value={m}>{api.PAY_LABELS[m]}</option>)}
+              </select>
+            </label>
+          )}
+          <button className="btn btn-primary" disabled={busy} onClick={() => run('confirm')}>Confirm payment received</button>
+        </>
+      ) : d.payStatus === 'reported' ? (
+        <p className="muted">You said you paid by {label(d.payMethod).toLowerCase()}. Waiting for the garage to confirm.</p>
+      ) : (
+        <>
+          <p className="muted">Pay the garage directly, then tell us how you paid.</p>
+          <label>
+            How will you pay?
+            <select value={method} onChange={(e) => setMethod(e.target.value)}>
+              {methods.map((m) => <option key={m} value={m}>{label(m)}</option>)}
+            </select>
+          </label>
+          {method === 'online' && d.garagePay?.link && (
+            <a className="btn btn-outline" href={d.garagePay.link} target="_blank" rel="noopener noreferrer">Open the garage&apos;s payment page</a>
+          )}
+          {d.garagePay?.note && <p className="muted">Garage note: {d.garagePay.note}</p>}
+          <button className="btn btn-primary" disabled={busy} onClick={() => run('report')}>I&apos;ve paid</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One review per finished job, from the driver. */
+function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; onError: (e: unknown) => void }) {
+  const { d, onUpdate, onError } = props;
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (d.review) {
+    return (
+      <div className="pay-box" aria-label="Review">
+        <h4>{d.role === 'customer' ? 'Your review' : 'Customer review'}</h4>
+        <p className="review-stars" aria-label={`${d.review.rating} out of 5 stars`}>{stars(d.review.rating)}</p>
+        {d.review.comment && <p>{d.review.comment}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="pay-box" aria-label="Leave a review">
+      <h4>How did {d.garageName} do?</h4>
+      <div className="star-pick" role="group" aria-label="Rating">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button type="button" key={n} className={n <= rating ? 'on' : ''} aria-label={`${n} star${n > 1 ? 's' : ''}`} aria-pressed={n === rating} onClick={() => setRating(n)}>
+            ★
+          </button>
+        ))}
+      </div>
+      <label>
+        One line about your visit <small>(optional, max 140 characters)</small>
+        <input value={comment} onChange={(e) => setComment(e.target.value)} maxLength={140} placeholder="e.g. Fair price and ready on time" />
+      </label>
+      <button
+        className="btn btn-primary"
+        disabled={busy || rating === 0}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            onUpdate((await api.reviewAppointment(d.id, rating, comment.trim())).appointment);
+          } catch (e) {
+            onError(e);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Submit review
+      </button>
+    </div>
+  );
+}
 
 export function StatusBadge({ status, label }: { status: ApptStatus; label: string }) {
   return <span className={`status-badge s-${status}`}>{label}</span>;
@@ -52,15 +165,16 @@ function Stepper({ status }: { status: ApptStatus }) {
     );
   }
   const current = STEPS.findIndex((s) => s.status === status);
+  const finished = status === 'picked_up';
   return (
     <ol className="stepper" aria-label="Progress">
       {STEPS.map((s, i) => (
         <li
           key={s.status}
-          className={i < current ? 'done' : i === current ? (status === 'completed' ? 'done current' : 'current') : ''}
+          className={i < current || (i === current && (status === 'completed' || finished)) ? (i === current ? 'done current' : 'done') : i === current ? 'current' : ''}
           aria-current={i === current ? 'step' : undefined}
         >
-          <span>{i < current || status === 'completed' ? '✓' : i + 1}</span>
+          <span>{i < current || (i === current && (status === 'completed' || finished)) ? '✓' : i + 1}</span>
           <em>{s.label}</em>
         </li>
       ))}
@@ -256,6 +370,9 @@ export function AppointmentPanel(props: {
         </div>
       )}
 
+      {(d.canPay || d.payStatus === 'paid') && <PaySection d={d} onUpdate={apply} onError={handle} />}
+      {(d.canReview || d.review) && <ReviewSection d={d} onUpdate={apply} onError={handle} />}
+
       <div className="chat">
         <h4>Messages &amp; updates</h4>
         <div className="chat-list" ref={listRef} aria-live="polite">
@@ -306,8 +423,9 @@ type Role = 'customer' | 'garage';
 
 const matches = (role: Role, filter: string, s: ApptSummary): boolean => {
   if (filter === 'all') return true;
-  const open = s.status === 'requested' || s.status === 'booked' || s.status === 'at_garage' || s.status === 'in_progress';
-  if (filter === 'action') return s.status === 'requested';
+  // "Open" includes finished work still waiting for the car to be collected.
+  const open = s.status === 'requested' || s.status === 'booked' || s.status === 'at_garage' || s.status === 'in_progress' || s.status === 'completed';
+  if (filter === 'action') return s.status === 'requested' || s.payStatus === 'reported';
   if (filter === 'active') return role === 'garage' ? open && s.status !== 'requested' : open;
   return !open; // done
 };
@@ -509,7 +627,12 @@ export function BookingForm(props: {
               <input type="checkbox" checked={picked.includes(s.id)} onChange={() => toggle(s.id)} />
               <span>
                 {s.name}
-                {garage.mode === 'listing' && s.price > 0 && <b> from ${s.price}</b>}
+                {garage.mode === 'listing' && s.price > 0 && (
+                  <b>
+                    {' '}from ${s.finalPrice}
+                    {s.discount > 0 && <> ({s.discount}% off)</>}
+                  </b>
+                )}
               </span>
             </label>
           ))}

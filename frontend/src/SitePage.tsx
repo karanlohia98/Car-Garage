@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { FaClock, FaExternalLinkAlt, FaMapMarkerAlt, FaPhoneAlt } from 'react-icons/fa';
+import { FaClock, FaCreditCard, FaExternalLinkAlt, FaMapMarkerAlt, FaPhoneAlt } from 'react-icons/fa';
 import * as api from './api';
 import type { GarageDetail, SiteData } from './api';
 import { BookingForm } from './Appointments';
@@ -32,6 +32,13 @@ export function themeVars(t: api.Theme): CSSProperties {
   } as CSSProperties;
 }
 
+const SITE_STEPS = [
+  ['Book online', 'Pick your services and a time that suits you.'],
+  ['Drop off your car', 'We confirm your booking and keep you updated by chat.'],
+  ['We do the work', 'Follow each step: car at the garage, work in progress, completed.'],
+  ['Collect and pay', 'Pick up your car and pay the way you prefer.'],
+];
+
 /** A garage's own page at /g/{id}. Owners can use it as their website; the look comes from their theme. */
 export default function SitePage({ id }: { id: string }) {
   const [site, setSite] = useState<SiteData | null>(null);
@@ -52,8 +59,10 @@ export default function SitePage({ id }: { id: string }) {
 
   const t = site.theme;
   const toWebsite = site.mode === 'website';
-  const siteUrl = detail?.website;
   const signedIn = !!detail;
+  const priceOf = (sid: string) => detail?.services.find((x) => x.id === sid);
+  const tel = `tel:${site.phone.replace(/[^\d+]/g, '')}`;
+  const bookTarget = detail && !detail.mine && site.live ? '#book' : signedIn ? '#services' : `/?garage=${encodeURIComponent(site.id)}`;
   return (
     <div className="site" style={themeVars(t)}>
       {!site.live && <div className="site-banner">Preview: only you can see this page until it is approved and published.</div>}
@@ -62,8 +71,9 @@ export default function SitePage({ id }: { id: string }) {
           <b className="site-name">{site.name}</b>
           <nav>
             <a href="#services">Services</a>
+            <a href="#reviews">Reviews</a>
             <a href="#visit">Visit us</a>
-            <a className="site-btn" href={`tel:${site.phone.replace(/[^\d+]/g, '')}`}>Call {site.phone}</a>
+            <a className="site-btn" href={bookTarget}>Book now</a>
           </nav>
         </div>
       </header>
@@ -73,41 +83,89 @@ export default function SitePage({ id }: { id: string }) {
           <h1>{t.headline || site.name}</h1>
           <p className="s-lead">{t.about || site.tagline}</p>
           <div className="site-hero-actions">
-            <a className="site-btn" href="#services">See our services</a>
-            <Stars rating={site.rating} reviews={site.reviews} />
+            <a className="site-btn" href={bookTarget}>Book an appointment</a>
+            <a className="site-btn ghost" href={tel}>Call {site.phone}</a>
           </div>
         </div>
       </section>
 
+      <section className="site-trust site-wrap" aria-label="At a glance">
+        <div><b><Stars rating={site.rating} reviews={site.reviews} /></b><span>Rated by drivers</span></div>
+        <div><b><FaClock /> {site.hours}</b><span>Opening hours</span></div>
+        <div><b><FaMapMarkerAlt /> {site.area || site.city}</b><span>{site.address}</span></div>
+        <div><b><FaCreditCard /> {site.payMethods.map((m: api.PayMethod) => api.PAY_LABELS[m]).join(', ')}</b><span>Ways to pay</span></div>
+      </section>
+
       <section id="services" className="site-wrap site-sec">
-        <h2>Services</h2>
+        <h2>Our services</h2>
         <ul className="site-services">
-          {site.serviceNames.map((n, i) => {
-            const price = detail?.services.find((s) => s.id === site.serviceIds[i])?.price;
+          {site.services.map((sv) => {
+            const p = priceOf(sv.id);
             return (
-              <li key={site.serviceIds[i]}>
-                <span>{iconFor(site.serviceIds[i])} {n}</span>
-                {!toWebsite && price ? <b>from ${price}</b> : null}
+              <li key={sv.id}>
+                <div className="svc-head">
+                  <span className="svc-title">{iconFor(sv.id)} {sv.name}</span>
+                  {sv.discount > 0 && <span className="deal">{sv.discount}% off</span>}
+                </div>
+                {sv.description && <p className="s-muted">{sv.description}</p>}
+                <div className="svc-foot">
+                  {sv.duration && <span className="s-muted"><FaClock /> {sv.duration}</span>}
+                  {!toWebsite && p && p.price > 0 && (
+                    <b>
+                      {sv.discount > 0 && <s className="s-muted">${p.price}</s>} from ${p.finalPrice}
+                    </b>
+                  )}
+                </div>
               </li>
             );
           })}
         </ul>
-        {toWebsite && siteUrl && isHttpUrl(siteUrl) && (
-          <a className="site-btn" href={siteUrl} target="_blank" rel="noopener noreferrer">
+        {toWebsite && detail?.website && isHttpUrl(detail.website) && (
+          <a className="site-btn" href={detail.website} target="_blank" rel="noopener noreferrer">
             See prices on our website <FaExternalLinkAlt />
           </a>
         )}
-        {!signedIn && (
-          <p className="s-muted">
-            <a className="site-btn" href={`/?garage=${encodeURIComponent(site.id)}`}>Sign in to see prices and book</a>
-          </p>
+        {!signedIn && !toWebsite && (
+          <p><a className="site-btn" href={`/?garage=${encodeURIComponent(site.id)}`}>Sign in to see prices and book</a></p>
         )}
-        {detail && !detail.mine && site.live && (
+        {!signedIn && toWebsite && (
+          <p className="s-muted"><a href={`/?garage=${encodeURIComponent(site.id)}`}>Sign in to book an appointment</a></p>
+        )}
+      </section>
+
+      {detail && !detail.mine && site.live && (
+        <section id="book" className="site-wrap site-sec">
           <div className="site-book">
             <BookingForm garage={detail} onBooked={(apptId) => { window.location.href = `/?view=bookings&appt=${encodeURIComponent(apptId)}`; }} onSessionExpired={() => { api.setToken(null); window.location.reload(); }} />
           </div>
+        </section>
+      )}
+      {detail?.mine && <p className="site-wrap s-muted">This is your page. Customers book from here once it is live.</p>}
+
+      <section className="site-wrap site-sec">
+        <h2>How it works</h2>
+        <ol className="site-steps">
+          {SITE_STEPS.map(([title, text], i) => (
+            <li key={title}><span>{i + 1}</span><b>{title}</b><p className="s-muted">{text}</p></li>
+          ))}
+        </ol>
+      </section>
+
+      <section id="reviews" className="site-wrap site-sec">
+        <h2>What drivers say</h2>
+        {site.reviewList.length === 0 ? (
+          <p className="s-muted">No reviews yet. Drivers can leave one after their car has been serviced.</p>
+        ) : (
+          <ul className="site-reviews">
+            {site.reviewList.map((r, i) => (
+              <li key={i}>
+                <span className="review-stars" aria-label={`${r.rating} out of 5`}>{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
+                {r.comment && <p>&ldquo;{r.comment}&rdquo;</p>}
+                <small className="s-muted">{r.name}</small>
+              </li>
+            ))}
+          </ul>
         )}
-        {detail?.mine && <p className="s-muted">This is your page. Customers book from here once it is live.</p>}
       </section>
 
       <section id="visit" className="site-wrap site-sec">
@@ -115,7 +173,7 @@ export default function SitePage({ id }: { id: string }) {
         <ul className="site-visit">
           <li><FaMapMarkerAlt /> {site.address}, {site.city} {site.zip}</li>
           <li><FaClock /> {site.hours}</li>
-          <li><FaPhoneAlt /> {site.phone}</li>
+          <li><FaPhoneAlt /> <a href={tel}>{site.phone}</a></li>
         </ul>
       </section>
 

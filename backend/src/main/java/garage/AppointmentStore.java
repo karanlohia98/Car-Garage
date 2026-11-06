@@ -21,7 +21,7 @@ import java.util.Set;
 /**
  * Appointments between a driver (the customer) and a garage, with a status workflow and a chat thread.
  *
- * Workflow:  requested -> booked -> at_garage -> in_progress -> completed
+ * Workflow:  requested -> booked -> at_garage -> in_progress -> completed -> picked_up
  * Garage can also decline a request, or cancel a booking. The customer can cancel before the car arrives.
  * Every transition is checked here on the server; the UI only offers what is allowed.
  */
@@ -45,6 +45,7 @@ final class AppointmentStore {
     static final String AT_GARAGE = "at_garage";
     static final String IN_PROGRESS = "in_progress";
     static final String COMPLETED = "completed";
+    static final String PICKED_UP = "picked_up";
     static final String DECLINED = "declined";
     static final String CANCELLED = "cancelled";
 
@@ -54,6 +55,7 @@ final class AppointmentStore {
             AT_GARAGE, "Car at the garage",
             IN_PROGRESS, "Work in progress",
             COMPLETED, "Work completed",
+            PICKED_UP, "Car picked up",
             DECLINED, "Declined by the garage",
             CANCELLED, "Cancelled");
 
@@ -63,11 +65,13 @@ final class AppointmentStore {
             REQUESTED, List.of(BOOKED, DECLINED),
             BOOKED, List.of(AT_GARAGE, CANCELLED),
             AT_GARAGE, List.of(IN_PROGRESS),
-            IN_PROGRESS, List.of(COMPLETED));
+            IN_PROGRESS, List.of(COMPLETED),
+            COMPLETED, List.of(PICKED_UP));
 
     private static final Map<String, List<String>> CUSTOMER_NEXT = Map.of(
             REQUESTED, List.of(CANCELLED),
-            BOOKED, List.of(CANCELLED));
+            BOOKED, List.of(CANCELLED),
+            COMPLETED, List.of(PICKED_UP));
 
     private static final int MAX_OPEN_PER_CUSTOMER = 5;
     private static final int MAX_MESSAGES = 300;
@@ -95,6 +99,11 @@ final class AppointmentStore {
         List<Msg> messages = new ArrayList<>();
         int unreadCustomer;
         int unreadGarage;
+        String payStatus = "unpaid"; // unpaid | reported (customer says paid) | paid (garage confirmed)
+        String payMethod = "";
+        int rating;                  // 0 = no review yet
+        String reviewComment = "";
+        String reviewAt = "";
     }
 
     private final Path file;
@@ -137,7 +146,7 @@ final class AppointmentStore {
             String id = o instanceof String s ? s : "";
             GarageStore.Svc svc = g.services().stream().filter(x -> x.id().equals(id)).findFirst()
                     .orElseThrow(() -> new GarageStore.Invalid("That service isn't offered by this garage."));
-            if (seen.add(id)) lines.add(new Line(svc.name(), g.mode().equals(GarageStore.MODE_LISTING) ? svc.price() : 0));
+            if (seen.add(id)) lines.add(new Line(svc.name(), g.mode().equals(GarageStore.MODE_LISTING) ? svc.finalPrice() : 0));
         }
 
         String vehicle = text(b, "vehicle", "Car make and model", 2, 60, true, false);
@@ -248,6 +257,92 @@ final class AppointmentStore {
         return detailJson(a, role, gs.find(a.garageId));
     }
 
+    // ---------- payment and reviews ----------
+
+    private static final List<String> PAY_LABEL_KEYS = List.of("cash", "card", "transfer", "online");
+
+    private static String payLabel(String m) {
+        return switch (m) {
+            case "cash" -> "cash";
+            case "card" -> "card at the garage";
+            case "transfer" -> "bank transfer";
+            case "online" -> "online payment link";
+            default -> m;
+        };
+    }
+
+    /**
+     * Payment is tracked, not processed: the customer pays the garage directly (cash, card at the garage, transfer, or the
+     * garage's own online payment link). The customer reports it, and the garage confirms receipt.
+     * Body: {action: "report", method} (customer) or {action: "confirm", method?} (garage).
+     */
+    synchronized Map<String, Object> pay(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        if (!a.status.equals(COMPLETED) && !a.status.equals(PICKED_UP)) {
+            throw new Denied("Payment opens once the work is completed.");
+        }
+        if (a.payStatus.equals("paid")) throw new Denied("This appointment is already paid.");
+        GarageStore.Garage g = gs.find(a.garageId);
+        String action = b.get("action") instanceof String x ? x : "";
+        String method = b.get("method") instanceof String x ? x : "";
+        if (role.equals("customer")) {
+            if (!action.equals("report")) throw new Denied("Only the garage can confirm a payment.");
+            List<?> allowed = g == null ? List.of() : (List<?>) g.pay().get("methods");
+            if (!allowed.contains(method)) throw new GarageStore.Invalid("Choose one of the ways this garage accepts payment.");
+            a.payStatus = "reported";
+            a.payMethod = method;
+            addMessage(a, "system", "Payment: " + a.customerName + " says they paid by " + payLabel(method) + ".", role);
+        } else {
+            if (!action.equals("confirm")) throw new Denied("Customers report payments; the garage confirms them.");
+            if (a.payMethod.isEmpty()) {
+                if (!PAY_LABEL_KEYS.contains(method)) throw new GarageStore.Invalid("Choose how the customer paid.");
+                a.payMethod = method;
+            }
+            a.payStatus = "paid";
+            addMessage(a, "system", "Payment received (" + payLabel(a.payMethod) + "). Thank you!", role);
+        }
+        a.updatedAt = Instant.now().toString();
+        persist();
+        return detailJson(a, role, g);
+    }
+
+    /** One review per completed job, by the driver. Updates the garage's average rating. */
+    synchronized Map<String, Object> review(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        if (!role.equals("customer")) throw new Denied("Only the driver can review the garage.");
+        if (!a.status.equals(COMPLETED) && !a.status.equals(PICKED_UP)) throw new Denied("You can review once the work is completed.");
+        if (a.rating > 0) throw new Denied("You already reviewed this job.");
+        double r = b.get("rating") instanceof Number n ? n.doubleValue() : 0;
+        if (r != Math.rint(r) || r < 1 || r > 5) throw new GarageStore.Invalid("Choose 1 to 5 stars.");
+        a.reviewComment = text(b, "comment", "Review", 0, 140, false, false);
+        a.rating = (int) r;
+        a.reviewAt = Instant.now().toString();
+        gs.applyReview(a.garageId, a.rating);
+        addMessage(a, "system", a.customerName + " left a " + a.rating + "-star review.", role);
+        a.updatedAt = a.reviewAt;
+        persist();
+        return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    /** Latest reviews for a garage's public page. Names are shortened to first name and initial. */
+    synchronized List<Object> reviewsFor(String garageId, int limit) {
+        List<Appt> rated = new ArrayList<>();
+        for (Appt a : appts.values()) if (a.garageId.equals(garageId) && a.rating > 0) rated.add(a);
+        rated.sort(Comparator.comparing((Appt a) -> a.reviewAt).reversed());
+        List<Object> out = new ArrayList<>();
+        for (Appt a : rated) {
+            if (out.size() >= limit) break;
+            String[] parts = a.customerName.trim().split("\\s+");
+            String who = parts[0] + (parts.length > 1 ? " " + parts[parts.length - 1].charAt(0) + "." : "");
+            out.add(Json.obj("name", who, "rating", a.rating, "comment", a.reviewComment, "at", a.reviewAt));
+        }
+        return out;
+    }
+
     // ---------- helpers ----------
 
     private String roleOf(Appt a, String viewer, String as, GarageStore gs) {
@@ -303,7 +398,7 @@ final class AppointmentStore {
             for (Line l : a.services) names.add(l.name());
             out.add(Json.obj("id", a.id, "garageId", a.garageId, "garageName", a.garageName,
                     "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time,
-                    "status", a.status, "statusLabel", label(a.status), "services", names, "total", total(a),
+                    "status", a.status, "statusLabel", label(a.status), "services", names, "total", total(a), "payStatus", a.payStatus,
                     "unread", role.equals("customer") ? a.unreadCustomer : a.unreadGarage, "updatedAt", a.updatedAt));
         }
         return out;
@@ -314,6 +409,7 @@ final class AppointmentStore {
         for (Line l : a.services) services.add(Json.obj("name", l.name(), "price", l.price()));
         List<Object> messages = new ArrayList<>();
         for (Msg m : a.messages) messages.add(Json.obj("from", m.from(), "name", m.name(), "text", m.text(), "at", m.at()));
+        boolean finished = a.status.equals(COMPLETED) || a.status.equals(PICKED_UP);
         List<String> allowed = (role.equals("garage") ? GARAGE_NEXT : CUSTOMER_NEXT).getOrDefault(a.status, List.of());
         List<Object> actions = new ArrayList<>();
         for (String s : allowed) actions.add(Json.obj("status", s, "label", label(s)));
@@ -322,7 +418,12 @@ final class AppointmentStore {
                 "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time, "notes", a.notes,
                 "status", a.status, "statusLabel", label(a.status), "services", services, "total", total(a),
                 "createdAt", a.createdAt, "updatedAt", a.updatedAt, "messages", messages, "actions", actions,
-                "canChat", OPEN.contains(a.status) || a.status.equals(COMPLETED));
+                "canChat", OPEN.contains(a.status) || a.status.equals(COMPLETED),
+                "payStatus", a.payStatus, "payMethod", a.payMethod,
+                "canPay", finished && !a.payStatus.equals("paid"),
+                "canReview", finished && role.equals("customer") && a.rating == 0,
+                "review", a.rating == 0 ? null : Json.obj("rating", a.rating, "comment", a.reviewComment, "at", a.reviewAt),
+                "garagePay", g == null ? null : g.pay());
     }
 
     // ---------- persistence ----------
@@ -338,7 +439,9 @@ final class AppointmentStore {
                     "customerEmail", a.customerEmail, "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate,
                     "date", a.date, "time", a.time, "notes", a.notes, "status", a.status,
                     "createdAt", a.createdAt, "updatedAt", a.updatedAt, "services", services, "messages", messages,
-                    "unreadCustomer", a.unreadCustomer, "unreadGarage", a.unreadGarage));
+                    "unreadCustomer", a.unreadCustomer, "unreadGarage", a.unreadGarage,
+                    "payStatus", a.payStatus, "payMethod", a.payMethod, "rating", a.rating,
+                    "reviewComment", a.reviewComment, "reviewAt", a.reviewAt));
         }
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         Files.writeString(tmp, Json.write(Json.obj("appointments", all)), StandardCharsets.UTF_8);
@@ -378,6 +481,11 @@ final class AppointmentStore {
             }
             a.unreadCustomer = ((Number) m.getOrDefault("unreadCustomer", 0)).intValue();
             a.unreadGarage = ((Number) m.getOrDefault("unreadGarage", 0)).intValue();
+            a.payStatus = (String) m.getOrDefault("payStatus", "unpaid");
+            a.payMethod = (String) m.getOrDefault("payMethod", "");
+            a.rating = ((Number) m.getOrDefault("rating", 0)).intValue();
+            a.reviewComment = (String) m.getOrDefault("reviewComment", "");
+            a.reviewAt = (String) m.getOrDefault("reviewAt", "");
             appts.put(a.id, a);
         }
     }

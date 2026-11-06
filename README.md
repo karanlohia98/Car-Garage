@@ -13,6 +13,9 @@ each kind, each with its own password. Garage owner accounts only see the garage
 profile); driver accounts only see the directory and *My bookings*. The server enforces this: garage accounts can't
 book, driver accounts can't manage a garage. Accounts created before roles existed still work for both logins.
 
+**Two front doors.** Drivers use `/`; garage owners use `/owners`. Each home page shows only its own options, and a
+signed-in account is sent to its own side.
+
 **Drivers**
 1. Browse the garages near their ZIP code, search by name/area/city and filter by service.
 2. Choosing a garage opens that garage's own page (`/g/{id}`). Signing in as a driver there shows its prices and lets them book.
@@ -44,6 +47,19 @@ line, services, hours, address, phone and booking. Owners choose accent colour, 
 about line in the **Your page** step. Prices and booking still need a signed-in customer. Owners can preview the page
 before approval.
 
+## Services, offers, payments and reviews
+
+- Every service has a one-line description (ticking a standard service fills in a ready-made description and a typical
+  duration that the owner can reword) and an optional **percentage discount** (1-90%). Customers see the original and
+  discounted price, and bookings use the discounted price.
+- **Payment** is tracked, not processed. Garages choose how they accept payment: cash, card at the garage, bank transfer,
+  or their own online payment link (e.g. a Stripe, PayPal or Square payment link). After the work is completed the
+  driver picks a method and taps *I've paid*, and the garage confirms receipt. No card details ever touch this site.
+  Taking card payments directly in the site would need a payment provider account and keys.
+- **Reviews:** after the work is completed, the driver can leave one 1-5 star review with a one-line comment per job.
+  The garage's average rating updates and recent reviews appear on its page.
+- After *Work completed* the job has a final step, **Car picked up**, which either the garage or the driver can mark.
+
 ## Appointments and chat
 
 1. A driver opens a garage, clicks **Book an appointment**, picks services, their car, a date and time, and sends the
@@ -53,7 +69,7 @@ before approval.
 3. Each appointment has its own **chat** between driver and garage. Both sides see new messages within a few seconds.
 4. The garage moves the job through the status tracker and can attach an update note at every step:
 
-   `Appointment booked` -> `Car at the garage` -> `Work in progress` -> `Work completed`
+   `Appointment booked` -> `Car at the garage` -> `Work in progress` -> `Work completed` -> `Car picked up`
 
    (A booking starts as *waiting for the garage to accept*. The garage can also decline it. The driver can cancel
    until the car is at the garage.)

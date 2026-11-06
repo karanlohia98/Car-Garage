@@ -25,18 +25,25 @@ final class GarageStore {
         Invalid(String message) { super(message); }
     }
 
-    record Svc(String id, String name, String description, int price, String duration, String badge) {}
+    /** discount = percent off (0 = none, max 90). The price customers pay is finalPrice(). */
+    record Svc(String id, String name, String description, int price, String duration, String badge, int discount) {
+        Svc(String id, String name, String description, int price, String duration, String badge) {
+            this(id, name, description, price, duration, badge, 0);
+        }
+
+        int finalPrice() { return discount > 0 ? (int) Math.round(price * (100 - discount) / 100.0) : price; }
+    }
 
     record Garage(String id, String ownerEmail, String name, String city, String area, String zip, String address, String phone,
                   String hours, String tagline, String mode, String website, boolean published,
                   double rating, int reviews, List<Svc> services, String approval, String reviewNote,
-                  Map<String, String> theme) {
+                  Map<String, String> theme, Map<String, Object> pay) {
         /** Convenience for garages that need no review (samples). */
         Garage(String id, String ownerEmail, String name, String city, String area, String zip, String address, String phone,
                String hours, String tagline, String mode, String website, boolean published,
                double rating, int reviews, List<Svc> services) {
             this(id, ownerEmail, name, city, area, zip, address, phone, hours, tagline, mode, website, published,
-                    rating, reviews, services, APPROVED, "", DEFAULT_THEME);
+                    rating, reviews, services, APPROVED, "", DEFAULT_THEME, DEFAULT_PAY);
         }
 
         /** Visible to drivers and bookable: the owner published it and an admin approved it. */
@@ -45,6 +52,28 @@ final class GarageStore {
 
     /** Look of the garage's own page: accent colour, light/dark, font style, a headline and one line about the garage. */
     static final Map<String, String> DEFAULT_THEME = Map.of("accent", "#ff6a1a", "mode", "dark", "font", "modern", "headline", "", "about", "");
+    /** How the garage accepts payment. "online" uses the garage's own payment link (e.g. a Stripe or PayPal link). */
+    static final Map<String, Object> DEFAULT_PAY = Map.of("methods", List.of("card", "cash"), "link", "", "note", "");
+    private static final List<String> PAY_METHODS = List.of("cash", "card", "transfer", "online");
+
+    static Map<String, Object> parsePay(Object raw, Map<String, Object> fallback) {
+        if (!(raw instanceof Map<?, ?> m)) return fallback;
+        @SuppressWarnings("unchecked") Map<String, Object> b = (Map<String, Object>) m;
+        List<Object> methods = new ArrayList<>();
+        if (b.get("methods") instanceof List<?> l) {
+            for (Object o : l) {
+                if (!(o instanceof String x) || !PAY_METHODS.contains(x)) throw new Invalid("Unknown payment method.");
+                if (!methods.contains(x)) methods.add(x);
+            }
+        }
+        if (methods.isEmpty()) throw new Invalid("Choose at least one way customers can pay.");
+        String link = str(b, "link", "Payment link", 0, 300, false);
+        if (!link.isEmpty()) link = validUrl(link);
+        if (methods.contains("online") && link.isEmpty()) throw new Invalid("Add your online payment link, or untick online payment.");
+        String note = str(b, "note", "Payment note", 0, 100, false);
+        return Map.of("methods", methods, "link", link, "note", note);
+    }
+
     private static final Set<String> FONTS = Set.of("modern", "classic", "rounded");
     private static final Pattern HEX = Pattern.compile("^#[0-9a-fA-F]{6}$");
 
@@ -230,7 +259,8 @@ final class GarageStore {
                 // New garages wait for an admin. Approved ones stay approved when edited. A rejected one goes back to review.
                 existing != null && APPROVED.equals(existing.approval()) ? APPROVED : PENDING,
                 existing != null && APPROVED.equals(existing.approval()) ? existing.reviewNote() : "",
-                parseTheme(b.get("theme"), existing != null ? existing.theme() : DEFAULT_THEME));
+                parseTheme(b.get("theme"), existing != null ? existing.theme() : DEFAULT_THEME),
+                parsePay(b.get("pay"), existing != null ? existing.pay() : DEFAULT_PAY));
         garages.put(id, g);
         persist();
         return full(g, true);
@@ -272,7 +302,7 @@ final class GarageStore {
             state = REJECTED;
         } else throw new Invalid("Decision must be approve or reject.");
         Garage u = new Garage(g.id(), g.ownerEmail(), g.name(), g.city(), g.area(), g.zip(), g.address(), g.phone(), g.hours(),
-                g.tagline(), g.mode(), g.website(), g.published(), g.rating(), g.reviews(), g.services(), state, n, g.theme());
+                g.tagline(), g.mode(), g.website(), g.published(), g.rating(), g.reviews(), g.services(), state, n, g.theme(), g.pay());
         garages.put(id, u);
         persist();
         Map<String, Object> m = full(u, true);
@@ -324,7 +354,9 @@ final class GarageStore {
             if (CATALOG.containsKey(id)) {
                 if (!seen.add(id)) continue; // ignore duplicate catalog entries
                 name = CATALOG.get(id)[0];
-                desc = CATALOG.get(id)[1];
+                // The owner may reword the standard description; blank falls back to the default.
+                desc = str(s, "description", "Service description", 0, 160, false);
+                if (desc.isEmpty()) desc = CATALOG.get(id)[1];
             } else if (id.isEmpty() || id.startsWith("custom")) {
                 name = str(s, "name", "Service name", 2, 60, true);
                 desc = str(s, "description", "Service description", 0, 160, false);
@@ -341,7 +373,13 @@ final class GarageStore {
                 price = (int) p;
             }
             String duration = str(s, "duration", "Duration", 0, 20, false);
-            out.add(new Svc(id, name, desc, price, duration, ""));
+            int discount = 0;
+            if (s.get("discount") instanceof Number dn && dn.doubleValue() != 0) {
+                double d = dn.doubleValue();
+                if (d != Math.rint(d) || d < 1 || d > 90) throw new Invalid("Discount for " + name + " must be a whole number from 1 to 90 percent.");
+                discount = (int) d;
+            }
+            out.add(new Svc(id, name, desc, price, duration, "", discount));
         }
         return out;
     }
@@ -380,12 +418,13 @@ final class GarageStore {
         List<Object> services = new ArrayList<>();
         for (Svc s : g.services()) {
             services.add(Json.obj("id", s.id(), "name", s.name(), "description", s.description(),
-                    "price", s.price(), "duration", s.duration(), "badge", s.badge()));
+                    "price", s.price(), "discount", s.discount(), "finalPrice", s.finalPrice(),
+                    "duration", s.duration(), "badge", s.badge()));
         }
         Map<String, Object> m = Json.obj("id", g.id(), "name", g.name(), "city", g.city(), "area", g.area(), "zip", g.zip(),
                 "address", g.address(), "phone", g.phone(), "rating", g.rating(), "reviews", g.reviews(),
                 "hours", g.hours(), "tagline", g.tagline(), "mode", g.mode(), "website", g.website(),
-                "services", services);
+                "services", services, "pay", g.pay());
         if (forOwner) {
             m.put("published", g.published());
             m.put("approval", g.approval());
@@ -422,7 +461,8 @@ final class GarageStore {
             for (Object so : (List<Object>) m.getOrDefault("services", List.of())) {
                 Map<String, Object> s = (Map<String, Object>) so;
                 services.add(new Svc((String) s.get("id"), (String) s.get("name"), (String) s.get("description"),
-                        ((Number) s.get("price")).intValue(), (String) s.get("duration"), (String) s.getOrDefault("badge", "")));
+                        ((Number) s.get("price")).intValue(), (String) s.get("duration"), (String) s.getOrDefault("badge", ""),
+                        ((Number) s.getOrDefault("discount", 0)).intValue()));
             }
             Garage g = new Garage((String) m.get("id"), (String) m.getOrDefault("ownerEmail", ""), (String) m.get("name"),
                     (String) m.get("city"), (String) m.getOrDefault("area", ""),
@@ -435,9 +475,29 @@ final class GarageStore {
                     // Records saved before approval existed are treated as approved so existing data keeps working.
                     m.get("approval") instanceof String a && (a.equals(PENDING) || a.equals(REJECTED)) ? a : APPROVED,
                     (String) m.getOrDefault("reviewNote", ""),
-                    loadTheme(m.get("theme")));
+                    loadTheme(m.get("theme")), loadPay(m.get("pay")));
             garages.put(g.id(), g);
         }
+    }
+
+    private static Map<String, Object> loadPay(Object raw) {
+        try {
+            return parsePay(raw, DEFAULT_PAY);
+        } catch (Invalid e) {
+            return DEFAULT_PAY;
+        }
+    }
+
+    /** Folds a new star rating (1-5) into the garage's running average. */
+    synchronized void applyReview(String garageId, int rating) throws IOException {
+        Garage g = garages.get(garageId);
+        if (g == null) return;
+        int n = g.reviews() + 1;
+        double avg = Math.round((g.rating() * g.reviews() + rating) / n * 10) / 10.0;
+        garages.put(garageId, new Garage(g.id(), g.ownerEmail(), g.name(), g.city(), g.area(), g.zip(), g.address(), g.phone(),
+                g.hours(), g.tagline(), g.mode(), g.website(), g.published(), avg, n, g.services(), g.approval(), g.reviewNote(),
+                g.theme(), g.pay()));
+        persist();
     }
 
     private static Map<String, String> loadTheme(Object raw) {
@@ -459,6 +519,11 @@ final class GarageStore {
         m.put("phone", g.phone());
         m.put("theme", g.theme());
         m.put("live", g.live());
+        List<Object> svcs = new ArrayList<>();
+        for (Svc sv : g.services()) svcs.add(Json.obj("id", sv.id(), "name", sv.name(), "description", sv.description(),
+                "duration", sv.duration(), "discount", sv.discount()));
+        m.put("services", svcs);
+        m.put("payMethods", g.pay().get("methods"));
         return m;
     }
 

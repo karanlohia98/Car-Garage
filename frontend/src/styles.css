@@ -450,3 +450,43 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 .role-tag { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; color: var(--accent-2); }
 .loc-btn { display: inline-flex; align-items: center; gap: 8px; }
 .loc-note { color: var(--muted); font-size: .88rem; flex-basis: 100%; }
+.benefit-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.benefit-grid li { background: var(--bg-3); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: grid; gap: 8px; }
+.footer a { color: var(--muted); }
+.pay-box { display: grid; gap: 10px; padding: 16px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; margin-top: 14px; }
+.pay-box h4 { margin: 0; }
+.pay-box label { display: grid; gap: 6px; font-weight: 600; font-size: .9rem; }
+.pay-box select, .pay-box input { background: var(--bg-3); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 10px 12px; font: inherit; width: 100%; }
+.pay-box .btn { justify-self: start; text-decoration: none; }
+.pay-done { color: #4ade80; font-weight: 700; }
+.star-pick { display: flex; gap: 4px; }
+.star-pick button { background: none; border: 0; font-size: 2rem; color: var(--line); padding: 0 2px; line-height: 1; }
+.star-pick button.on { color: #fbbf24; }
+.review-stars { color: #fbbf24; font-size: 1.3rem; letter-spacing: 2px; }
+.status-badge.s-picked_up { background: rgba(34, 197, 94, .14); color: #4ade80; border-color: rgba(34, 197, 94, .4); }
+.svc-row { grid-template-columns: 1fr auto auto 120px auto !important; }
+.svc-row .svc-desc { grid-column: 1 / -1; background: var(--bg-3); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 12px; font: inherit; width: 100%; }
+.svc-row .money.pct { width: 100px; }
+.pay-methods { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; }
+.pay-methods legend { font-weight: 600; padding: 0 6px; }
+.check { display: flex !important; flex-direction: row; align-items: center; gap: 10px; font-weight: 500 !important; }
+.check input { width: auto !important; }
+@media (max-width: 640px) { .svc-row { grid-template-columns: 1fr 1fr !important; } }
+.site .site-btn.ghost { background: transparent; color: var(--s-text); border: 1px solid var(--s-line); }
+.site-trust { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: -28px; position: relative; }
+.site-trust > div { background: var(--s-bg); border: 1px solid var(--s-line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.site-trust b { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.site-trust span { color: var(--s-muted); font-size: .85rem; }
+.site-services li { display: grid !important; gap: 8px; align-content: start; }
+.svc-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.svc-title { font-weight: 700; display: flex; gap: 8px; align-items: center; }
+.svc-foot { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.deal { background: var(--s-accent); color: var(--s-on-accent); font-size: .75rem; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.site-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.site-steps li { border: 1px solid var(--s-line); border-radius: 12px; padding: 16px; background: var(--s-bg2); display: grid; gap: 6px; }
+.site-steps li > span { width: 28px; height: 28px; border-radius: 50%; background: var(--s-accent); color: var(--s-on-accent); display: grid; place-items: center; font-weight: 800; }
+.site-reviews { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.site-reviews li { border: 1px solid var(--s-line); border-radius: 12px; padding: 16px; background: var(--s-bg2); display: grid; gap: 6px; }
+.site .review-stars { color: #f59e0b; }
+.site-book .book-form, .site-book .book-cta { background: var(--s-bg2); border: 1px solid var(--s-line); border-radius: 14px; padding: 20px; }
+.svc-row .money.pct { width: 130px; white-space: nowrap; } .svc-row .money.pct span { white-space: nowrap; }

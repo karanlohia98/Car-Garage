@@ -42,10 +42,43 @@ export const DEFAULT_THEME: Theme = { accent: '#ff6a1a', mode: 'dark', font: 'mo
 
 /** Public data for a garage's own page (no prices). */
 export interface SiteData extends GarageSummary {
+  services: SiteService[];
+  payMethods: PayMethod[];
+  reviewList: Review[];
   address: string;
   phone: string;
   theme: Theme;
   live: boolean;
+}
+
+export type PayMethod = 'cash' | 'card' | 'transfer' | 'online';
+export const PAY_LABELS: Record<PayMethod, string> = {
+  cash: 'Cash',
+  card: 'Card at the garage',
+  transfer: 'Bank transfer',
+  online: 'Online payment link',
+};
+
+/** How a garage accepts payment. Payments are tracked here, but made directly to the garage. */
+export interface PayInfo {
+  methods: PayMethod[];
+  link: string;
+  note: string;
+}
+
+export interface Review {
+  name: string;
+  rating: number;
+  comment: string;
+  at: string;
+}
+
+export interface SiteService {
+  id: string;
+  name: string;
+  description: string;
+  duration: string;
+  discount: number;
 }
 
 export type Range = 'exact' | 'near' | 'wide';
@@ -57,6 +90,9 @@ export interface Service {
   price: number;
   duration: string;
   badge: string;
+  /** Percent off (0 = none). finalPrice is what the customer pays. */
+  discount: number;
+  finalPrice: number;
 }
 
 /** Full garage details with prices (login required). */
@@ -74,12 +110,15 @@ export interface GarageDetail {
   tagline: string;
   mode: PricingMode;
   website: string;
+  pay: PayInfo;
   services: Service[];
   /** True when the signed-in user owns this garage (so the UI hides "Book"). */
   mine?: boolean;
 }
 
-export type ApptStatus = 'requested' | 'booked' | 'at_garage' | 'in_progress' | 'completed' | 'declined' | 'cancelled';
+export type PayStatus = 'unpaid' | 'reported' | 'paid';
+
+export type ApptStatus = 'requested' | 'booked' | 'at_garage' | 'in_progress' | 'completed' | 'picked_up' | 'declined' | 'cancelled';
 
 export interface ApptSummary {
   id: string;
@@ -94,6 +133,7 @@ export interface ApptSummary {
   statusLabel: string;
   services: string[];
   total: number;
+  payStatus: PayStatus;
   unread: number;
   updatedAt: string;
 }
@@ -129,6 +169,12 @@ export interface ApptDetail {
   /** Status changes the signed-in user may make right now (enforced by the server). */
   actions: { status: ApptStatus; label: string }[];
   canChat: boolean;
+  payStatus: PayStatus;
+  payMethod: string;
+  canPay: boolean;
+  canReview: boolean;
+  review: { rating: number; comment: string; at: string } | null;
+  garagePay: PayInfo | null;
 }
 
 export interface BookingInput {
@@ -168,6 +214,7 @@ export interface ServiceInput {
   description?: string;
   price?: number;
   duration?: string;
+  discount?: number;
 }
 
 export interface GarageInput {
@@ -183,6 +230,7 @@ export interface GarageInput {
   website: string;
   published: boolean;
   theme: Theme;
+  pay: PayInfo;
   services: ServiceInput[];
 }
 
@@ -331,3 +379,15 @@ export const adminDecide = (id: string, decision: 'approve' | 'reject', note: st
 export const adminLogout = () => adminRequest<{ ok: boolean }>('/api/admin/logout', { method: 'POST' });
 
 export const fetchSite = (id: string) => request<{ garage: SiteData }>(`/api/sites/${encodeURIComponent(id)}`);
+
+export const payAppointment = (id: string, action: 'report' | 'confirm', method: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/payment`, {
+    method: 'POST',
+    body: JSON.stringify({ action, method }),
+  });
+
+export const reviewAppointment = (id: string, rating: number, comment: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comment }),
+  });
