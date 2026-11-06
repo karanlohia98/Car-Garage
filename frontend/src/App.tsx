@@ -12,14 +12,20 @@ import {
 } from 'react-icons/fa';
 import * as api from './api';
 import type { GarageDetail, GarageSummary, User } from './api';
+import { AppointmentsWorkspace, BookingForm } from './Appointments';
 import GarageDashboard from './GarageDashboard';
 import { Stars, formatPlace, fullAddress, iconFor, isHttpUrl, scrollToId } from './shared';
 
 type AuthMode = 'login' | 'signup';
 /** What the visitor was trying to do when they were asked to sign in. */
 type Intent = 'driver' | 'garage';
-/** Which side of the site a signed-in user is looking at. One account can use both. */
-type View = 'driver' | 'garage';
+/** Which part of the site a signed-in user is looking at. One account can use all of them. */
+type View = 'driver' | 'bookings' | 'garage';
+
+interface Unread {
+  bookings: number;
+  garage: number;
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -27,6 +33,9 @@ export default function App() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [authIntent, setAuthIntent] = useState<Intent>('driver');
   const [view, setView] = useState<View>('driver');
+  // Appointment to open when the bookings screen appears (set right after booking).
+  const [focusApptId, setFocusApptId] = useState<string | null>(null);
+  const [unread, setUnread] = useState<Unread>({ bookings: 0, garage: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Garage the visitor clicked before signing in; opened right after they authenticate.
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -54,6 +63,24 @@ export default function App() {
       .finally(() => setChecking(false));
   }, []);
 
+  // Unread message/update counts for the header badges. Polled while signed in.
+  const refreshUnread = useCallback(() => {
+    if (!api.getToken()) return;
+    const sum = (list: { unread: number }[]) => list.reduce((n, a) => n + a.unread, 0);
+    api.fetchMyBookings().then((r) => setUnread((u) => ({ ...u, bookings: sum(r.appointments) }))).catch(() => undefined);
+    api.fetchGarageAppointments().then((r) => setUnread((u) => ({ ...u, garage: sum(r.appointments) }))).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setUnread({ bookings: 0, garage: 0 });
+      return;
+    }
+    refreshUnread();
+    const t = setInterval(() => !document.hidden && refreshUnread(), 15000);
+    return () => clearInterval(t);
+  }, [user, refreshUnread]);
+
   const openAuth = (mode: AuthMode, intent: Intent = 'driver') => {
     setAuthIntent(intent);
     setAuthMode(mode);
@@ -61,7 +88,15 @@ export default function App() {
 
   const switchView = (v: View) => {
     setView(v);
+    if (v === 'bookings') setFocusApptId(null);
     if (v === 'driver') loadGarages(); // pick up a garage that was just published or changed
+    window.scrollTo({ top: 0 });
+  };
+
+  const handleBooked = (appointmentId: string) => {
+    setFocusApptId(appointmentId);
+    setView('bookings');
+    refreshUnread();
     window.scrollTo({ top: 0 });
   };
 
@@ -101,6 +136,7 @@ export default function App() {
     setUser(null);
     setSelectedId(null);
     setView('driver');
+    setFocusApptId(null);
   }, []);
 
   const handleSelect = (id: string) => {
@@ -119,6 +155,7 @@ export default function App() {
   };
 
   const showGarageView = !!user && view === 'garage';
+  const showBookings = !!user && view === 'bookings';
   const selected = garages?.find((g) => g.id === selectedId) ?? null;
   const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
@@ -128,6 +165,7 @@ export default function App() {
         user={user}
         checking={checking}
         view={view}
+        unread={unread}
         onView={switchView}
         onAuth={openAuth}
         onLogout={handleLogout}
@@ -138,7 +176,25 @@ export default function App() {
             user={user}
             onSessionExpired={handleLogout}
             onGarageCreated={() => setUser((u) => (u ? { ...u, hasGarage: true } : u))}
+            unread={unread.garage}
+            onActivity={refreshUnread}
           />
+        ) : showBookings ? (
+          <section id="bookings" className="section">
+            <div className="wrap">
+              <div className="section-head">
+                <p className="eyebrow">My bookings</p>
+                <h2>Your appointments</h2>
+                <p className="muted">Track each booking, chat with the garage and see updates as your car is worked on.</p>
+              </div>
+              <AppointmentsWorkspace
+                role="customer"
+                initialId={focusApptId}
+                onActivity={refreshUnread}
+                onSessionExpired={handleLogout}
+              />
+            </div>
+          </section>
         ) : (
           <>
             <Hero user={user} onAuth={openAuth} />
@@ -157,6 +213,7 @@ export default function App() {
                 id={selectedId}
                 summary={selected}
                 onSessionExpired={handleLogout}
+                onBooked={handleBooked}
                 onBack={() => {
                   setSelectedId(null);
                   scrollToId('garages');
@@ -192,11 +249,12 @@ function Header(props: {
   user: User | null;
   checking: boolean;
   view: View;
+  unread: Unread;
   onView: (v: View) => void;
   onAuth: (m: AuthMode, intent?: Intent) => void;
   onLogout: () => void;
 }) {
-  const { user, checking, view, onView, onAuth, onLogout } = props;
+  const { user, checking, view, unread, onView, onAuth, onLogout } = props;
   const garageView = !!user && view === 'garage';
   return (
     <header className="header">
@@ -224,10 +282,18 @@ function Header(props: {
             <>
               <div className="view-switch" role="group" aria-label="Switch view">
                 <button className={view === 'driver' ? 'on' : ''} aria-pressed={view === 'driver'} onClick={() => onView('driver')}>
-                  Find a garage
+                  <span className="full">Find a garage</span>
+                  <span className="short">Find</span>
+                </button>
+                <button className={view === 'bookings' ? 'on' : ''} aria-pressed={view === 'bookings'} onClick={() => onView('bookings')}>
+                  <span className="full">My bookings</span>
+                  <span className="short">Bookings</span>
+                  {unread.bookings > 0 && <span className="unread" aria-label={`${unread.bookings} unread`}>{unread.bookings}</span>}
                 </button>
                 <button className={view === 'garage' ? 'on' : ''} aria-pressed={view === 'garage'} onClick={() => onView('garage')}>
-                  {user.hasGarage ? 'My garage' : 'List my garage'}
+                  <span className="full">{user.hasGarage ? 'My garage' : 'List my garage'}</span>
+                  <span className="short">{user.hasGarage ? 'Garage' : 'List'}</span>
+                  {unread.garage > 0 && <span className="unread" aria-label={`${unread.garage} unread`}>{unread.garage}</span>}
                 </button>
               </div>
               <span className="hello">Hi, {user.name.split(' ')[0]}</span>
@@ -498,9 +564,10 @@ function GarageDetailSection(props: {
   id: string;
   summary: GarageSummary | null;
   onSessionExpired: () => void;
+  onBooked: (appointmentId: string) => void;
   onBack: () => void;
 }) {
-  const { id, summary, onSessionExpired, onBack } = props;
+  const { id, summary, onSessionExpired, onBooked, onBack } = props;
   const [garage, setGarage] = useState<GarageDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -614,12 +681,19 @@ function GarageDetailSection(props: {
             <p className="booking-note">
               <FaPhoneAlt />
               <span>
-                Ready to book? Call {garage.name} on <a href={tel}>{garage.phone}</a> or drop in during opening hours.
+                Prefer to talk? Call {garage.name} on <a href={tel}>{garage.phone}</a> or drop in during opening hours.
                 Prices are starting prices for a standard passenger vehicle.
               </span>
             </p>
           </>
         )}
+
+        {garage &&
+          (garage.mine ? (
+            <p className="own-note">This is your own garage. Drivers see this page and can book from here.</p>
+          ) : (
+            <BookingForm garage={garage} onBooked={onBooked} onSessionExpired={onSessionExpired} />
+          ))}
       </div>
     </section>
   );

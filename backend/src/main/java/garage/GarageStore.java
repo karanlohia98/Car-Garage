@@ -87,12 +87,25 @@ final class GarageStore {
     synchronized Map<String, Object> detailFor(String id, String viewerEmail) {
         Garage g = garages.get(id);
         if (g == null) return null;
-        if (!g.published() && !g.ownerEmail().equalsIgnoreCase(viewerEmail)) return null;
-        return full(g, false);
+        boolean mine = g.ownerEmail().equalsIgnoreCase(viewerEmail);
+        if (!g.published() && !mine) return null;
+        Map<String, Object> m = full(g, false);
+        m.put("mine", mine); // lets the UI hide "Book" on your own garage
+        return m;
     }
 
     synchronized boolean hasGarage(String ownerEmail) {
         return byOwner(ownerEmail) != null;
+    }
+
+    /** Raw garage by id (any state), or null. */
+    synchronized Garage find(String id) {
+        return garages.get(id);
+    }
+
+    /** The garage owned by this email, or null. */
+    synchronized Garage findByOwner(String ownerEmail) {
+        return byOwner(ownerEmail);
     }
 
     /** The owner's own garage (including draft state), or null if they haven't set one up. */

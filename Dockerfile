@@ -22,8 +22,9 @@ ENV HOST=0.0.0.0 \
     STATIC_DIR=/app/static \
     DATA_FILE=/data/users.tsv \
     GARAGES_FILE=/data/garages.json \
+    APPOINTMENTS_FILE=/data/appointments.json \
     SEED_SAMPLES=false
-# Accounts and garages live here: mount a persistent volume or they are lost when the container is replaced.
+# Accounts, garages and appointments live here: mount a persistent volume or they are lost when the container is replaced.
 VOLUME /data
 EXPOSE 8080
 CMD ["java", "-Xmx256m", "-cp", "out", "garage.Main"]

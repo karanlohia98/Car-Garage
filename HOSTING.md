@@ -1,7 +1,7 @@
 # Hosting Garage Hub cheaply
 
-The whole site is **one small Java process** (API plus the built React files) and two data files, so it needs very
-little: about 256 MB of memory, and a disk that survives restarts (accounts and garages are stored in files).
+The whole site is **one small Java process** (API plus the built React files) and three data files (accounts, garages,
+appointments and chats), so it needs very little: about 256 MB of memory, and a disk that survives restarts.
 
 ## The cheapest options
 
@@ -51,8 +51,10 @@ mount it at `/data`. The Dockerfile sets `HOST=0.0.0.0` and `SEED_SAMPLES=false`
 
 ## Before real users arrive
 
-- **Back up `/data`** (two small files) regularly.
+- **Back up `/data`** (three small files) regularly. Appointments and chat history are in there.
 - Logins are held in memory, so everyone is signed out when the server restarts. That is fine for a start.
+- Chat updates arrive by polling every few seconds (no push notifications or emails yet), so a garage only sees a
+  new booking while it has the site open. Email or SMS alerts would be the next thing to add.
 - There is **no rate limiting** on login, no email verification and no password reset yet.
 - Anyone can list a garage and it goes live immediately, so add an approval step before you advertise the site.
-- Once you have many garages or want several servers, move the two files to a database (e.g. Postgres).
+- Once you have many garages or want several servers, move the data files to a database (e.g. Postgres).

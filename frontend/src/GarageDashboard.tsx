@@ -10,6 +10,7 @@ import {
 } from 'react-icons/fa';
 import * as api from './api';
 import type { CatalogItem, GarageInput, OwnerGarage, PricingMode, User } from './api';
+import { AppointmentsWorkspace } from './Appointments';
 import { fullAddress, iconFor, isCustomService, isHttpUrl } from './shared';
 
 interface ServiceRow {
@@ -120,12 +121,17 @@ export default function GarageDashboard(props: {
   onSessionExpired: () => void;
   /** Called after the garage is created, so the app can update the user's hasGarage flag. */
   onGarageCreated: () => void;
+  /** Unread messages/updates across this garage's appointments (for the tab badge). */
+  unread: number;
+  /** Called whenever appointment data changed, so the app can refresh its badges. */
+  onActivity: () => void;
 }) {
-  const { user, onSessionExpired, onGarageCreated } = props;
+  const { user, onSessionExpired, onGarageCreated, unread, onActivity } = props;
   const [garage, setGarage] = useState<OwnerGarage | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<'appointments' | 'profile'>('appointments');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -135,6 +141,7 @@ export default function GarageDashboard(props: {
       .then((r) => {
         setGarage(r.garage);
         setEditing(r.garage === null);
+        setTab(r.garage ? 'appointments' : 'profile');
       })
       .catch((e: api.ApiError) => {
         if (e.status === 401) onSessionExpired();
@@ -160,10 +167,11 @@ export default function GarageDashboard(props: {
       <div className="wrap">
         <div className="section-head">
           <p className="eyebrow">My garage</p>
-          <h2>{garage ? 'Your garage' : `Hi ${user.name.split(' ')[0]}, let's list your garage`}</h2>
+          <h2>{garage ? garage.name : `Hi ${user.name.split(' ')[0]}, let's list your garage`}</h2>
           <p className="muted">
-            Answer a few quick questions and your garage appears in the directory. You can change your answers any time,
-            and switch back to <b>Find a garage</b> above whenever you want to browse as a driver.
+            {garage
+              ? 'Accept bookings, chat with customers and keep them updated as the work moves along. Use the switch above to browse as a driver.'
+              : 'Answer a few quick questions and your garage appears in the directory. You can change your answers any time.'}
           </p>
         </div>
 
@@ -176,6 +184,21 @@ export default function GarageDashboard(props: {
               Try again
             </button>
           </div>
+        )}
+
+        {!loading && garage && !editing && (
+          <div className="tabs" role="tablist" aria-label="Garage sections">
+            <button role="tab" aria-selected={tab === 'appointments'} className={tab === 'appointments' ? 'on' : ''} onClick={() => setTab('appointments')}>
+              Appointments {unread > 0 && <span className="unread">{unread}</span>}
+            </button>
+            <button role="tab" aria-selected={tab === 'profile'} className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')}>
+              Garage profile
+            </button>
+          </div>
+        )}
+
+        {!loading && garage && !editing && tab === 'appointments' && (
+          <AppointmentsWorkspace role="garage" onActivity={onActivity} onSessionExpired={onSessionExpired} />
         )}
 
         {!loading && editing && (
@@ -193,7 +216,7 @@ export default function GarageDashboard(props: {
           />
         )}
 
-        {!loading && !editing && garage && (
+        {!loading && !editing && garage && tab === 'profile' && (
           <MyGarageCard garage={garage} onEdit={() => setEditing(true)} onTogglePublish={togglePublish} />
         )}
       </div>

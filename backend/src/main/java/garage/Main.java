@@ -39,6 +39,8 @@ public final class Main {
         Path garagesFile = Path.of(System.getenv().getOrDefault("GARAGES_FILE", "data/garages.json"));
         boolean seedSamples = !"false".equalsIgnoreCase(System.getenv("SEED_SAMPLES"));
         GarageStore garageStore = new GarageStore(garagesFile, seedSamples);
+        AppointmentStore appointments = new AppointmentStore(
+                Path.of(System.getenv().getOrDefault("APPOINTMENTS_FILE", "data/appointments.json")));
 
         // Local by default. Set HOST=0.0.0.0 when running in a container or on a server behind a proxy.
         String host = System.getenv().getOrDefault("HOST", "127.0.0.1");
@@ -51,6 +53,8 @@ public final class Main {
         server.createContext("/api/catalog", ex -> handle(ex, () -> catalog(ex)));
         server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store, garageStore)));
         server.createContext("/api/my/garage", ex -> handle(ex, () -> myGarage(ex, store, garageStore)));
+        server.createContext("/api/my/appointments", ex -> handle(ex, () -> garageAppointments(ex, store, garageStore, appointments)));
+        server.createContext("/api/appointments", ex -> handle(ex, () -> appointmentsApi(ex, store, garageStore, appointments)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
         System.out.println("Garage Hub running at http://localhost:" + port + "  (static: " + dist + ")");
@@ -63,6 +67,10 @@ public final class Main {
             a.run();
         } catch (GarageStore.Invalid e) {
             send(ex, 400, Json.write(Json.obj("error", e.getMessage())));
+        } catch (AppointmentStore.NotFound e) {
+            send(ex, 404, Json.write(Json.obj("error", e.getMessage())));
+        } catch (AppointmentStore.Denied e) {
+            send(ex, 403, Json.write(Json.obj("error", e.getMessage())));
         } catch (IllegalArgumentException e) {
             send(ex, 400, Json.write(Json.obj("error", "Invalid request")));
         } catch (Exception e) {
@@ -140,6 +148,56 @@ public final class Main {
             send(ex, 200, Json.write(Json.obj("garage", saved)));
         } else {
             send(ex, 405, Json.write(Json.obj("error", "Method not allowed")));
+        }
+    }
+
+    /** GET /api/my/appointments: bookings made at the signed-in user's own garage. */
+    private static void garageAppointments(HttpExchange ex, UserStore store, GarageStore garageStore, AppointmentStore appts) throws Exception {
+        if (!method(ex, "GET")) return;
+        UserStore.User u = store.userForToken(bearer(ex));
+        if (u == null) { error(ex, 401, "Please sign in."); return; }
+        send(ex, 200, Json.write(Json.obj("appointments", appts.listForGarage(u.email(), garageStore))));
+    }
+
+    /**
+     * POST /api/appointments                    book (as a driver)
+     * GET  /api/appointments                    my bookings as a driver
+     * GET  /api/appointments/{id}               details + chat (driver or the garage's owner)
+     * POST /api/appointments/{id}/messages      {text}
+     * POST /api/appointments/{id}/status        {status, note?}
+     */
+    private static void appointmentsApi(HttpExchange ex, UserStore store, GarageStore garageStore, AppointmentStore appts) throws Exception {
+        UserStore.User u = store.userForToken(bearer(ex));
+        if (u == null) { error(ex, 401, "Please sign in."); return; }
+        String rest = ex.getRequestURI().getPath().substring("/api/appointments".length());
+        if (rest.endsWith("/") && rest.length() > 1) rest = rest.substring(0, rest.length() - 1);
+        String m = ex.getRequestMethod();
+
+        if (rest.isEmpty() || rest.equals("/")) {
+            if (m.equals("GET")) {
+                send(ex, 200, Json.write(Json.obj("appointments", appts.listForCustomer(u.email()))));
+            } else if (m.equals("POST")) {
+                Map<String, Object> created = appts.create(u.email(), u.name(), Json.parseObject(body(ex)), garageStore);
+                send(ex, 201, Json.write(Json.obj("appointment", created)));
+            } else {
+                send(ex, 405, Json.write(Json.obj("error", "Method not allowed")));
+            }
+            return;
+        }
+
+        String[] parts = rest.substring(1).split("/");
+        String id = parts[0];
+        if (parts.length == 1) {
+            if (!m.equals("GET")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.detail(id, u.email(), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("messages")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("status")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.changeStatus(id, u.email(), Json.parseObject(body(ex)), garageStore))));
+        } else {
+            error(ex, 404, "Not found.");
         }
     }
 

@@ -46,6 +46,67 @@ export interface GarageDetail {
   mode: PricingMode;
   website: string;
   services: Service[];
+  /** True when the signed-in user owns this garage (so the UI hides "Book"). */
+  mine?: boolean;
+}
+
+export type ApptStatus = 'requested' | 'booked' | 'at_garage' | 'in_progress' | 'completed' | 'declined' | 'cancelled';
+
+export interface ApptSummary {
+  id: string;
+  garageId: string;
+  garageName: string;
+  customerName: string;
+  vehicle: string;
+  date: string;
+  time: string;
+  status: ApptStatus;
+  statusLabel: string;
+  services: string[];
+  total: number;
+  unread: number;
+  updatedAt: string;
+}
+
+export interface ApptMessage {
+  from: 'customer' | 'garage' | 'system';
+  name: string;
+  text: string;
+  at: string;
+}
+
+export interface ApptDetail {
+  id: string;
+  /** Which side the signed-in user is on for this appointment. */
+  role: 'customer' | 'garage';
+  garageId: string;
+  garageName: string;
+  garagePhone: string;
+  garageAddress: string;
+  customerName: string;
+  vehicle: string;
+  date: string;
+  time: string;
+  notes: string;
+  status: ApptStatus;
+  statusLabel: string;
+  services: { name: string; price: number }[];
+  total: number;
+  createdAt: string;
+  updatedAt: string;
+  messages: ApptMessage[];
+  /** Status changes the signed-in user may make right now (enforced by the server). */
+  actions: { status: ApptStatus; label: string }[];
+  canChat: boolean;
+}
+
+export interface BookingInput {
+  garageId: string;
+  serviceIds: string[];
+  vehicle: string;
+  date: string;
+  time: string;
+  notes: string;
 }
 
 /** A garage as seen by its owner (includes draft state). */
@@ -145,6 +206,30 @@ export const fetchGarages = () => request<{ garages: GarageSummary[] }>('/api/ga
 
 export const fetchGarage = (id: string) =>
   request<{ garage: GarageDetail }>(`/api/garages/${encodeURIComponent(id)}`);
+
+export const bookAppointment = (input: BookingInput) =>
+  request<{ appointment: ApptDetail }>('/api/appointments', { method: 'POST', body: JSON.stringify(input) });
+
+/** Appointments I booked as a driver. */
+export const fetchMyBookings = () => request<{ appointments: ApptSummary[] }>('/api/appointments');
+
+/** Appointments booked at my garage. */
+export const fetchGarageAppointments = () => request<{ appointments: ApptSummary[] }>('/api/my/appointments');
+
+export const fetchAppointment = (id: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}`);
+
+export const sendMessage = (id: string, text: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+
+export const setStatus = (id: string, status: ApptStatus, note: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status, note }),
+  });
 
 export const fetchMyGarage = () => request<{ garage: OwnerGarage | null }>('/api/my/garage');
 

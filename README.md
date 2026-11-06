@@ -27,6 +27,24 @@ address, services and prices. Garage owners can open the driver pages any time t
 
 Each account can only read and edit its own garage profile.
 
+## Appointments and chat
+
+1. A driver opens a garage, clicks **Book an appointment**, picks services, their car, a date and time, and sends the
+   request. It appears under **My bookings**.
+2. The garage sees it under **My garage > Appointments** (with an unread badge) and can **accept** or **decline** it,
+   adding a note to the customer.
+3. Each appointment has its own **chat** between driver and garage. Both sides see new messages within a few seconds.
+4. The garage moves the job through the status tracker and can attach an update note at every step:
+
+   `Appointment booked` -> `Car at the garage` -> `Work in progress` -> `Work completed`
+
+   (A booking starts as *waiting for the garage to accept*. The garage can also decline it. The driver can cancel
+   until the car is at the garage.)
+
+Every status change appears in the chat timeline. The server enforces who can do what: only the garage can accept and
+advance a job, steps can't be skipped or reversed, only the two people involved can see an appointment, and you can't
+book your own garage. Chat is plain text only (markup is shown, never executed), limited to 1000 characters per message.
+
 ## Run it locally
 
 Requirements: JDK 17+ and Node 18+.
@@ -50,7 +68,8 @@ On first start the server creates five sample garages in `backend/data/garages.j
 folder to reset everything, or start with `SEED_SAMPLES=false` for an empty directory.
 
 Environment variables (all optional): `HOST` (`127.0.0.1`; use `0.0.0.0` on a server), `PORT` (8080), `STATIC_DIR`
-(`../frontend/dist`), `DATA_FILE` (`data/users.tsv`), `GARAGES_FILE` (`data/garages.json`), `SEED_SAMPLES` (`true`).
+(`../frontend/dist`), `DATA_FILE` (`data/users.tsv`), `GARAGES_FILE` (`data/garages.json`), `APPOINTMENTS_FILE`
+(`data/appointments.json`), `SEED_SAMPLES` (`true`).
 
 To put it online cheaply, see [HOSTING.md](HOSTING.md) (includes a `Dockerfile`).
 
@@ -69,6 +88,12 @@ Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 | GET    | `/api/garages/{id}`| Bearer              | one garage with prices or website link |
 | GET    | `/api/my/garage`   | Bearer              | your own garage profile (or `null`) |
 | PUT    | `/api/my/garage`   | Bearer              | create or update your garage profile |
+| POST   | `/api/appointments` | Bearer             | book: `{garageId,serviceIds,vehicle,date,time,notes}` |
+| GET    | `/api/appointments` | Bearer             | my bookings as a driver |
+| GET    | `/api/my/appointments` | Bearer          | bookings made at my garage |
+| GET    | `/api/appointments/{id}` | Bearer        | details and chat (only the driver or that garage's owner); marks it read |
+| POST   | `/api/appointments/{id}/messages` | Bearer | `{text}` |
+| POST   | `/api/appointments/{id}/status` | Bearer | `{status,note?}`, allowed transitions only |
 
 Prices are enforced server-side: `/api/garages/{id}` returns `401` without a valid session token, and the public
 list never contains prices. All garage input is validated on the server (lengths, phone format, whole-dollar prices,
@@ -77,8 +102,10 @@ list never contains prices. All garage input is validated on the server (lengths
 ## Notes
 
 - Passwords are hashed with PBKDF2-HMAC-SHA256 (120k iterations, per-user salt). Users are stored in
-  `backend/data/users.tsv` and garages in `backend/data/garages.json` (both git-ignored); sessions are in memory and
-  last 12 hours.
+  `backend/data/users.tsv`, garages in `garages.json` and appointments/chats in `appointments.json` (all git-ignored);
+  sessions are in memory and last 12 hours.
+- Chat is refreshed by polling (every 5 s while a conversation is open), not push. There are no email/SMS
+  notifications yet, so a garage only sees a new booking while the site is open.
 - This is a starter, not production-ready: no HTTPS, rate limiting, email verification or password reset, and the
   file-based stores are meant for local use. Swap in a real database before deploying. Garage accounts are not
   verified, so in production you would want an approval step before a garage goes live.
