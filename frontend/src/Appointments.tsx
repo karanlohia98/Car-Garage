@@ -144,7 +144,7 @@ export function AppointmentPanel(props: {
     }
   };
 
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void send();
@@ -184,7 +184,7 @@ export function AppointmentPanel(props: {
         <div>
           <h3>{isGarage ? d.customerName : d.garageName}</h3>
           <p className="muted">
-            <FaCar /> {d.vehicle} &middot; <FaClock /> {formatWhen(d.date, d.time)}
+            <FaCar /> {d.vehicle}{d.plate ? ` (${d.plate})` : ''} &middot; <FaClock /> {formatWhen(d.date, d.time)}
           </p>
         </div>
         <StatusBadge status={d.status} label={d.statusLabel} />
@@ -205,8 +205,8 @@ export function AppointmentPanel(props: {
         </dd>
         {d.notes && (
           <>
-            <dt>{isGarage ? 'Customer notes' : 'Your notes'}</dt>
-            <dd className="pre">{d.notes}</dd>
+            <dt>{isGarage ? 'Customer note' : 'Your note'}</dt>
+            <dd>{d.notes}</dd>
           </>
         )}
         {!isGarage && (d.garagePhone || d.garageAddress) && (
@@ -233,12 +233,11 @@ export function AppointmentPanel(props: {
           {isGarage && (
             <label>
               Add a note for the customer <small>(optional, sent with the update)</small>
-              <textarea
-                rows={2}
+              <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                maxLength={1000}
-                placeholder="e.g. Found a worn brake pad, will need +$90. OK to go ahead?"
+                maxLength={200}
+                placeholder="e.g. Front pads are worn, +$90. OK to go ahead?"
               />
             </label>
           )}
@@ -277,12 +276,11 @@ export function AppointmentPanel(props: {
         </div>
         {d.canChat ? (
           <div className="chat-input">
-            <textarea
-              rows={2}
+            <input
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKey}
-              maxLength={1000}
+              maxLength={300}
               placeholder={isGarage ? 'Message the customer...' : 'Message the garage...'}
               aria-label="Message"
             />
@@ -406,7 +404,7 @@ export function AppointmentsWorkspace(props: {
                   {s.unread > 0 && <span className="unread" aria-label={`${s.unread} unread`}>{s.unread}</span>}
                 </span>
                 <span className="appt-item-mid">
-                  {s.vehicle} &middot; {formatWhen(s.date, s.time)}
+                  {s.vehicle}{s.plate ? ` (${s.plate})` : ''} &middot; {formatWhen(s.date, s.time)}
                 </span>
                 <span className="appt-item-svc">{s.services.join(', ')}</span>
                 <StatusBadge status={s.status} label={s.statusLabel} />
@@ -429,6 +427,17 @@ export function AppointmentsWorkspace(props: {
   );
 }
 
+/** Half-hour appointment slots from 7:00 to 18:30. */
+const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => {
+  const mins = 7 * 60 + i * 30;
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${mins % 60 === 0 ? '00' : '30'}`;
+});
+
+const slotLabel = (t: string): string => {
+  const [h, m] = t.split(':').map(Number);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+
 /** "Book an appointment" form shown on a garage's page. */
 export function BookingForm(props: {
   garage: GarageDetail;
@@ -439,6 +448,7 @@ export function BookingForm(props: {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [vehicle, setVehicle] = useState('');
+  const [plate, setPlate] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('09:00');
   const [notes, setNotes] = useState('');
@@ -451,7 +461,8 @@ export function BookingForm(props: {
     e.preventDefault();
     setError(null);
     if (picked.length === 0) return setError('Choose at least one service.');
-    if (vehicle.trim().length < 2) return setError('Tell the garage which car it is.');
+    if (vehicle.trim().length < 2) return setError('Enter your car make and model.');
+    if (!/^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$/.test(plate.trim())) return setError('Enter your number plate (letters and numbers only).');
     if (!date) return setError('Choose a date.');
     setBusy(true);
     try {
@@ -459,6 +470,7 @@ export function BookingForm(props: {
         garageId: garage.id,
         serviceIds: picked,
         vehicle: vehicle.trim(),
+        plate: plate.trim().toUpperCase(),
         date,
         time,
         notes: notes.trim(),
@@ -503,10 +515,23 @@ export function BookingForm(props: {
           ))}
         </div>
       </fieldset>
-      <label>
-        Your car
-        <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="e.g. 2018 Honda Civic, plate ABC123" maxLength={80} />
-      </label>
+      <div className="two">
+        <label>
+          Car make and model
+          <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="e.g. Honda Civic 2018" maxLength={60} autoComplete="off" />
+        </label>
+        <label>
+          Number plate
+          <input
+            value={plate}
+            onChange={(e) => setPlate(e.target.value.toUpperCase())}
+            placeholder="e.g. ABC 1234"
+            maxLength={10}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+      </div>
       <div className="two">
         <label>
           Date
@@ -514,12 +539,18 @@ export function BookingForm(props: {
         </label>
         <label>
           Time
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          <select value={time} onChange={(e) => setTime(e.target.value)}>
+            {TIME_SLOTS.map((t) => (
+              <option key={t} value={t}>
+                {slotLabel(t)}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       <label>
-        Anything the garage should know? <small>(optional)</small>
-        <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} placeholder="e.g. Grinding noise when braking" />
+        Short note for the garage <small>(optional, max 120 characters)</small>
+        <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={120} placeholder="e.g. Grinding noise when braking" />
       </label>
       {error && (
         <div className="notice error" role="alert">

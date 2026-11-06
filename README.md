@@ -27,6 +27,22 @@ address, services and prices. Garage owners can open the driver pages any time t
 
 Each account can only read and edit its own garage profile.
 
+**Location.** Drivers enter a ZIP code and a range (my ZIP / around my ZIP / my wider area) and only garages in that
+area are listed, nearest first. The choice is remembered in the browser. Matching is by ZIP prefix (same ZIP, same
+first 4 digits, same first 3 digits), so it is an approximation of distance, not exact miles. Garages saved before ZIP
+existed get one from their address if it contains one; otherwise the owner is asked to add it.
+
+**Admin approval.** New garages are *pending* until the platform admin approves them at `/admin`. Rejections need a
+reason, which the owner sees. Garages that existed before this feature are treated as approved. On first start the
+server creates the admin account with a random username and password, stores only a hash in `data/admin.json`, and
+writes the plain credentials once to `admin-credentials.txt` (git-ignored; delete it after saving them). Set
+`ADMIN_USERNAME` and `ADMIN_PASSWORD` (12+ characters) to choose your own. Five wrong logins lock the admin login for 10 minutes.
+
+**Each garage's own page.** Every garage has a page at `/g/{garage-id}` that works as its own website: headline, about
+line, services, hours, address, phone and booking. Owners choose accent colour, light or dark, font style, headline and
+about line in the **Your page** step. Prices and booking still need a signed-in customer. Owners can preview the page
+before approval.
+
 ## Appointments and chat
 
 1. A driver opens a garage, clicks **Book an appointment**, picks services, their car, a date and time, and sends the
@@ -43,7 +59,7 @@ Each account can only read and edit its own garage profile.
 
 Every status change appears in the chat timeline. The server enforces who can do what: only the garage can accept and
 advance a job, steps can't be skipped or reversed, only the two people involved can see an appointment, and you can't
-book your own garage. Chat is plain text only (markup is shown, never executed), limited to 1000 characters per message.
+book your own garage. Chat is single-line plain text (markup is shown, never executed), limited to 300 characters per message. Bookings take the car make/model and number plate in separate fields.
 
 ## Run it locally
 
@@ -65,11 +81,12 @@ java -cp out garage.Main                          # run from backend/
 ```
 
 On first start the server creates five sample garages in `backend/data/garages.json`. Delete the `backend/data`
-folder to reset everything, or start with `SEED_SAMPLES=false` for an empty directory.
+folder to reset everything (this also removes the admin account, which is then regenerated), or start with `SEED_SAMPLES=false` for an empty directory.
 
 Environment variables (all optional): `HOST` (`127.0.0.1`; use `0.0.0.0` on a server), `PORT` (8080), `STATIC_DIR`
 (`../frontend/dist`), `DATA_FILE` (`data/users.tsv`), `GARAGES_FILE` (`data/garages.json`), `APPOINTMENTS_FILE`
-(`data/appointments.json`), `SEED_SAMPLES` (`true`).
+(`data/appointments.json`), `ADMIN_FILE` (`data/admin.json`), `ADMIN_CREDENTIALS_FILE` (`admin-credentials.txt`),
+`ADMIN_USERNAME`/`ADMIN_PASSWORD`, `SEED_SAMPLES` (`true`).
 
 To put it online cheaply, see [HOSTING.md](HOSTING.md) (includes a `Dockerfile`).
 
@@ -84,11 +101,14 @@ Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 | GET    | `/api/me`          | Bearer              | current user (`hasGarage` tells you if they also own a garage) |
 | POST   | `/api/logout`      | Bearer              | ends the session |
 | GET    | `/api/catalog`     | none                | standard service list garages can pick from |
-| GET    | `/api/garages`     | none                | published garages and the services they offer, **no prices** |
+| GET    | `/api/garages?zip=&range=` | none        | approved, published garages near a ZIP (`range`: `exact`, `near`, `wide`), **no prices** |
+| GET    | `/api/sites/{id}`  | none                | public data for a garage's own page (owner can preview before approval) |
+| POST   | `/api/admin/login` | none                | `{username,password}` -> admin token |
+| GET/POST | `/api/admin/garages[/{id}/decision]` | admin token | review queue; `{decision:"approve"\|"reject",note}` |
 | GET    | `/api/garages/{id}`| Bearer              | one garage with prices or website link |
 | GET    | `/api/my/garage`   | Bearer              | your own garage profile (or `null`) |
 | PUT    | `/api/my/garage`   | Bearer              | create or update your garage profile |
-| POST   | `/api/appointments` | Bearer             | book: `{garageId,serviceIds,vehicle,date,time,notes}` |
+| POST   | `/api/appointments` | Bearer             | book: `{garageId,serviceIds,vehicle,plate,date,time,notes}` |
 | GET    | `/api/appointments` | Bearer             | my bookings as a driver |
 | GET    | `/api/my/appointments` | Bearer          | bookings made at my garage |
 | GET    | `/api/appointments/{id}` | Bearer        | details and chat (only the driver or that garage's owner); marks it read |

@@ -13,6 +13,7 @@ export interface GarageSummary {
   name: string;
   city: string;
   area: string;
+  zip: string;
   rating: number;
   reviews: number;
   hours: string;
@@ -20,7 +21,30 @@ export interface GarageSummary {
   mode: PricingMode;
   serviceIds: string[];
   serviceNames: string[];
+  /** How close this garage is to the searched ZIP, e.g. "Same ZIP code". */
+  nearness?: string;
 }
+
+/** How far around the ZIP code to look. The server matches on ZIP prefixes, so these are approximate areas. */
+export interface Theme {
+  accent: string;
+  mode: 'light' | 'dark';
+  font: 'modern' | 'classic' | 'rounded';
+  headline: string;
+  about: string;
+}
+
+export const DEFAULT_THEME: Theme = { accent: '#ff6a1a', mode: 'dark', font: 'modern', headline: '', about: '' };
+
+/** Public data for a garage's own page (no prices). */
+export interface SiteData extends GarageSummary {
+  address: string;
+  phone: string;
+  theme: Theme;
+  live: boolean;
+}
+
+export type Range = 'exact' | 'near' | 'wide';
 
 export interface Service {
   id: string;
@@ -37,6 +61,7 @@ export interface GarageDetail {
   name: string;
   city: string;
   area: string;
+  zip: string;
   address: string;
   phone: string;
   rating: number;
@@ -58,6 +83,7 @@ export interface ApptSummary {
   garageName: string;
   customerName: string;
   vehicle: string;
+  plate: string;
   date: string;
   time: string;
   status: ApptStatus;
@@ -85,6 +111,7 @@ export interface ApptDetail {
   garageAddress: string;
   customerName: string;
   vehicle: string;
+  plate: string;
   date: string;
   time: string;
   notes: string;
@@ -104,14 +131,25 @@ export interface BookingInput {
   garageId: string;
   serviceIds: string[];
   vehicle: string;
+  plate: string;
   date: string;
   time: string;
   notes: string;
 }
 
 /** A garage as seen by its owner (includes draft state). */
+export type Approval = 'pending' | 'approved' | 'rejected';
+
 export interface OwnerGarage extends GarageDetail {
   published: boolean;
+  theme: Theme;
+  /** Set by the platform admin. Only approved, published garages are visible to drivers. */
+  approval: Approval;
+  reviewNote: string;
+}
+
+export interface AdminGarage extends OwnerGarage {
+  ownerEmail: string;
 }
 
 export interface CatalogItem {
@@ -132,6 +170,7 @@ export interface GarageInput {
   name: string;
   city: string;
   area: string;
+  zip: string;
   address: string;
   phone: string;
   hours: string;
@@ -139,6 +178,7 @@ export interface GarageInput {
   mode: PricingMode;
   website: string;
   published: boolean;
+  theme: Theme;
   services: ServiceInput[];
 }
 
@@ -202,7 +242,18 @@ export const logout = () => request<{ ok: boolean }>('/api/logout', { method: 'P
 
 export const fetchCatalog = () => request<{ services: CatalogItem[] }>('/api/catalog');
 
-export const fetchGarages = () => request<{ garages: GarageSummary[] }>('/api/garages');
+export interface Where {
+  zip: string;
+  range: Range;
+}
+
+/** Garages near a ZIP code. Without a ZIP the server returns nothing: drivers always pick a location first. */
+export const fetchGarages = (w: Where) =>
+  request<{ garages: GarageSummary[] }>(`/api/garages?zip=${encodeURIComponent(w.zip)}&range=${w.range}`);
+
+/** Fallback search by city or neighbourhood name, for garages that have no ZIP on file. */
+export const fetchGaragesByCity = (city: string) =>
+  request<{ garages: GarageSummary[] }>(`/api/garages?city=${encodeURIComponent(city)}`);
 
 export const fetchGarage = (id: string) =>
   request<{ garage: GarageDetail }>(`/api/garages/${encodeURIComponent(id)}`);
@@ -235,3 +286,44 @@ export const fetchMyGarage = () => request<{ garage: OwnerGarage | null }>('/api
 
 export const saveMyGarage = (input: GarageInput) =>
   request<{ garage: OwnerGarage }>('/api/my/garage', { method: 'PUT', body: JSON.stringify(input) });
+
+
+// ---------- platform admin (separate sign-in, separate token) ----------
+
+const ADMIN_KEY = 'garage.admin';
+
+export const getAdminToken = (): string | null => {
+  try {
+    return sessionStorage.getItem(ADMIN_KEY);
+  } catch {
+    return null;
+  }
+};
+
+export const setAdminToken = (t: string | null): void => {
+  try {
+    if (t) sessionStorage.setItem(ADMIN_KEY, t);
+    else sessionStorage.removeItem(ADMIN_KEY);
+  } catch {
+    /* ignore */
+  }
+};
+
+const adminRequest = <T,>(path: string, init: RequestInit = {}) =>
+  request<T>(path, { ...init, headers: { Authorization: `Bearer ${getAdminToken() ?? ''}` } });
+
+export const adminLogin = (username: string, password: string) =>
+  request<{ token: string }>('/api/admin/login', { method: 'POST', body: JSON.stringify({ username, password }), headers: { Authorization: '' } });
+
+export const adminGarages = (status = '') =>
+  adminRequest<{ garages: AdminGarage[]; pending: number }>(`/api/admin/garages${status ? `?status=${status}` : ''}`);
+
+export const adminDecide = (id: string, decision: 'approve' | 'reject', note: string) =>
+  adminRequest<{ garage: AdminGarage }>(`/api/admin/garages/${encodeURIComponent(id)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, note }),
+  });
+
+export const adminLogout = () => adminRequest<{ ok: boolean }>('/api/admin/logout', { method: 'POST' });
+
+export const fetchSite = (id: string) => request<{ garage: SiteData }>(`/api/sites/${encodeURIComponent(id)}`);

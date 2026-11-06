@@ -42,6 +42,9 @@ public final class Main {
         AppointmentStore appointments = new AppointmentStore(
                 Path.of(System.getenv().getOrDefault("APPOINTMENTS_FILE", "data/appointments.json")));
 
+        AdminStore admin = new AdminStore(Path.of(System.getenv().getOrDefault("ADMIN_FILE", "data/admin.json")),
+                Path.of(System.getenv().getOrDefault("ADMIN_CREDENTIALS_FILE", "admin-credentials.txt")));
+
         // Local by default. Set HOST=0.0.0.0 when running in a container or on a server behind a proxy.
         String host = System.getenv().getOrDefault("HOST", "127.0.0.1");
         HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
@@ -55,6 +58,8 @@ public final class Main {
         server.createContext("/api/my/garage", ex -> handle(ex, () -> myGarage(ex, store, garageStore)));
         server.createContext("/api/my/appointments", ex -> handle(ex, () -> garageAppointments(ex, store, garageStore, appointments)));
         server.createContext("/api/appointments", ex -> handle(ex, () -> appointmentsApi(ex, store, garageStore, appointments)));
+        server.createContext("/api/sites", ex -> handle(ex, () -> site(ex, store, garageStore)));
+        server.createContext("/api/admin", ex -> handle(ex, () -> adminApi(ex, admin, garageStore)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
         System.out.println("Garage Hub running at http://localhost:" + port + "  (static: " + dist + ")");
@@ -126,7 +131,9 @@ public final class Main {
         if (!method(ex, "GET")) return;
         String rest = ex.getRequestURI().getPath().substring("/api/garages".length());
         if (rest.isEmpty() || rest.equals("/")) {
-            send(ex, 200, Json.write(Json.obj("garages", garageStore.publicList())));
+            Map<String, String> q = query(ex);
+            send(ex, 200, Json.write(Json.obj("garages",
+                    garageStore.publicList(q.getOrDefault("zip", ""), q.getOrDefault("range", "near"), q.getOrDefault("city", "")))));
             return;
         }
         UserStore.User u = store.userForToken(bearer(ex));
@@ -199,6 +206,62 @@ public final class Main {
         } else {
             error(ex, 404, "Not found.");
         }
+    }
+
+    /**
+     * POST /api/admin/login {username,password} -> {token}
+     * GET  /api/admin/garages[?status=pending|approved|rejected]   (admin token)
+     * POST /api/admin/garages/{id}/decision {decision:"approve"|"reject", note}
+     * POST /api/admin/logout
+     */
+    private static void adminApi(HttpExchange ex, AdminStore admin, GarageStore garageStore) throws Exception {
+        String rest = ex.getRequestURI().getPath().substring("/api/admin".length());
+        String m = ex.getRequestMethod();
+        if (rest.equals("/login")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            Map<String, String> b = Json.parseFlatObject(body(ex));
+            String t = admin.login(b.getOrDefault("username", "").trim(), b.getOrDefault("password", ""));
+            if (t == null) { error(ex, 401, "Incorrect username or password."); return; }
+            send(ex, 200, Json.write(Json.obj("token", t)));
+            return;
+        }
+        if (!admin.valid(bearer(ex))) { error(ex, 401, "Admin sign-in required."); return; }
+        if (rest.equals("/logout") && m.equals("POST")) {
+            admin.logout(bearer(ex));
+            send(ex, 200, Json.write(Json.obj("ok", true)));
+        } else if (rest.equals("/garages") && m.equals("GET")) {
+            send(ex, 200, Json.write(Json.obj("garages", garageStore.adminList(query(ex).get("status")),
+                    "pending", garageStore.pendingCount())));
+        } else if (rest.startsWith("/garages/") && rest.endsWith("/decision") && m.equals("POST")) {
+            String id = rest.substring("/garages/".length(), rest.length() - "/decision".length());
+            Map<String, String> b = Json.parseFlatObject(body(ex));
+            send(ex, 200, Json.write(Json.obj("garage", garageStore.decide(id, b.getOrDefault("decision", ""), b.get("note")))));
+        } else {
+            error(ex, 404, "Not found.");
+        }
+    }
+
+    /** GET /api/sites/{id}: public page data for one garage's own site (no prices). */
+    private static void site(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
+        if (!method(ex, "GET")) return;
+        String id = ex.getRequestURI().getPath().substring("/api/sites".length()).replaceAll("^/|/$", "");
+        UserStore.User u = store.userForToken(bearer(ex));
+        Map<String, Object> g = garageStore.siteFor(id, u == null ? null : u.email());
+        if (g == null) { error(ex, 404, "Garage not found."); return; }
+        send(ex, 200, Json.write(Json.obj("garage", g)));
+    }
+
+    private static Map<String, String> query(HttpExchange ex) {
+        Map<String, String> out = new java.util.HashMap<>();
+        String raw = ex.getRequestURI().getRawQuery();
+        if (raw == null) return out;
+        for (String pair : raw.split("&")) {
+            int i = pair.indexOf('=');
+            if (i <= 0) continue;
+            out.put(java.net.URLDecoder.decode(pair.substring(0, i), StandardCharsets.UTF_8),
+                    java.net.URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
+        }
+        return out;
     }
 
     private static void serveStatic(HttpExchange ex, Path dist) throws IOException {

@@ -11,7 +11,7 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { GarageDetail, GarageSummary, User } from './api';
+import type { GarageDetail, GarageSummary, Range, User, Where } from './api';
 import { AppointmentsWorkspace, BookingForm } from './Appointments';
 import GarageDashboard from './GarageDashboard';
 import { Stars, formatPlace, fullAddress, iconFor, isHttpUrl, scrollToId } from './shared';
@@ -26,6 +26,26 @@ interface Unread {
   bookings: number;
   garage: number;
 }
+
+const WHERE_KEY = 'garage.where';
+
+const loadWhere = (): Where | null => {
+  try {
+    const w = JSON.parse(localStorage.getItem(WHERE_KEY) ?? 'null') as Where | null;
+    return w && /^\d{5}$/.test(w.zip) && ['exact', 'near', 'wide'].includes(w.range) ? w : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveWhere = (w: Where | null): void => {
+  try {
+    if (w) localStorage.setItem(WHERE_KEY, JSON.stringify(w));
+    else localStorage.removeItem(WHERE_KEY);
+  } catch {
+    /* storage unavailable: the choice lasts until reload */
+  }
+};
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -42,25 +62,58 @@ export default function App() {
 
   const [garages, setGarages] = useState<GarageSummary[] | null>(null);
   const [garagesError, setGaragesError] = useState<string | null>(null);
+  // Where the driver is looking. Remembered between visits; garages are only listed once this is set.
+  const [where, setWhereState] = useState<Where | null>(loadWhere);
 
   const loadGarages = useCallback(() => {
     setGaragesError(null);
+    if (!where) {
+      setGarages(null);
+      return;
+    }
     api
-      .fetchGarages()
+      .fetchGarages(where)
       .then((r) => setGarages(r.garages))
       .catch((e: Error) => setGaragesError(e.message));
-  }, []);
+  }, [where]);
 
   useEffect(loadGarages, [loadGarages]);
 
-  // Restore an existing session on load.
+  const changeWhere = (w: Where | null) => {
+    saveWhere(w);
+    setGarages(null);
+    setSelectedId(null);
+    setWhereState(w);
+  };
+
+  // Restore an existing session on load. Links from a garage's own page: /?garage=ID opens that garage
+  // (after sign-in if needed), /?view=bookings opens My bookings.
   useEffect(() => {
-    if (!api.getToken()) return;
+    const q = new URLSearchParams(window.location.search);
+    const gid = q.get('garage');
+    const wantBookings = q.get('view') === 'bookings';
+    if (gid || q.has('view')) window.history.replaceState(null, '', '/');
+    if (!api.getToken()) {
+      setChecking(false);
+      if (gid) {
+        setPendingId(gid);
+        openAuth('login', 'driver');
+      }
+      return;
+    }
     api
       .me()
-      .then((r) => setUser(r.user))
+      .then((r) => {
+        setUser(r.user);
+        if (gid) {
+          setSelectedId(gid);
+          scrollToId('garage-detail');
+        }
+        if (wantBookings) setView('bookings');
+      })
       .catch(() => api.setToken(null))
       .finally(() => setChecking(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Unread message/update counts for the header badges. Polled while signed in.
@@ -201,6 +254,8 @@ export default function App() {
             <TrustStrip />
             <GaragesSection
               garages={garages}
+              where={where}
+              onWhere={changeWhere}
               error={garagesError}
               onRetry={loadGarages}
               user={user}
@@ -432,7 +487,60 @@ function TrustStrip() {
   );
 }
 
+/** ZIP code and range picker. Drivers must choose a location before any garages are shown. */
+function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }) {
+  const { where, onWhere } = props;
+  const [zip, setZip] = useState(where?.zip ?? '');
+  const [range, setRange] = useState<Range>(where?.range ?? 'near');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!/^\d{5}$/.test(zip)) return setError('Enter a 5-digit ZIP code.');
+    setError(null);
+    onWhere({ zip, range });
+  };
+
+  return (
+    <form className="location-bar" onSubmit={submit} noValidate>
+      <label>
+        Your ZIP code
+        <span className="loc-input">
+          <FaMapMarkerAlt aria-hidden="true" />
+          <input
+            value={zip}
+            onChange={(e) => setZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+            inputMode="numeric"
+            autoComplete="postal-code"
+            maxLength={5}
+            placeholder="e.g. 98108"
+            aria-label="Your ZIP code"
+          />
+        </span>
+      </label>
+      <label>
+        How far?
+        <select value={range} onChange={(e) => setRange(e.target.value as Range)} aria-label="How far to search">
+          <option value="exact">Only my ZIP code</option>
+          <option value="near">Around my ZIP code</option>
+          <option value="wide">My wider area</option>
+        </select>
+      </label>
+      <button type="submit" className="btn btn-primary">
+        Find garages
+      </button>
+      {error && (
+        <span className="loc-error" role="alert">
+          {error}
+        </span>
+      )}
+    </form>
+  );
+}
+
 function GaragesSection(props: {
+  where: Where | null;
+  onWhere: (w: Where | null) => void;
   garages: GarageSummary[] | null;
   error: string | null;
   onRetry: () => void;
@@ -440,7 +548,7 @@ function GaragesSection(props: {
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const { garages, error, onRetry, user, selectedId, onSelect } = props;
+  const { where, onWhere, garages, error, onRetry, user, selectedId, onSelect } = props;
   const [query, setQuery] = useState('');
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
 
@@ -471,11 +579,21 @@ function GaragesSection(props: {
           <p className="eyebrow">Garages near you</p>
           <h2>Choose a garage</h2>
           <p className="muted">
-            Compare what each garage offers.{' '}
+            Enter your ZIP code to see garages in your area.{' '}
             {user ? 'Pick one to see its services and pricing.' : 'Sign in to see their services and pricing.'}
           </p>
         </div>
 
+        <LocationBar where={where} onWhere={onWhere} />
+
+        {!where && (
+          <p className="muted empty">
+            Type your ZIP code above and we&apos;ll show only the garages around you.
+          </p>
+        )}
+
+        {where && (
+        <>
         <div className="filters">
           <label className="search">
             <FaSearch aria-hidden="true" />
@@ -521,7 +639,13 @@ function GaragesSection(props: {
           </div>
         )}
 
-        {garages && visible.length === 0 && <p className="muted empty">No garages match your search. Try clearing a filter.</p>}
+        {garages && garages.length === 0 && where && (
+          <p className="muted empty">
+            No garages found {where.range === 'exact' ? 'in' : 'around'} {where.zip} yet.
+            {where.range !== 'wide' ? ' Try a wider area above.' : ' Know a garage here? Ask them to list it on Garage Hub.'}
+          </p>
+        )}
+        {garages && garages.length > 0 && visible.length === 0 && <p className="muted empty">No garages match your search. Try clearing a filter.</p>}
 
         {garages && visible.length > 0 && (
           <div className="garage-grid">
@@ -531,8 +655,9 @@ function GaragesSection(props: {
                   <div>
                     <h3>{g.name}</h3>
                     <p className="area">
-                      <FaMapMarkerAlt /> {formatPlace(g)}
+                      <FaMapMarkerAlt /> {formatPlace(g)} {g.zip}
                     </p>
+                    {g.nearness && <p className="near">{g.nearness}</p>}
                   </div>
                   <Stars rating={g.rating} reviews={g.reviews} />
                 </div>
@@ -554,6 +679,8 @@ function GaragesSection(props: {
               </article>
             ))}
           </div>
+        )}
+        </>
         )}
       </div>
     </section>

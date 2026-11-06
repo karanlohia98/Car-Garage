@@ -27,15 +27,63 @@ final class GarageStore {
 
     record Svc(String id, String name, String description, int price, String duration, String badge) {}
 
-    record Garage(String id, String ownerEmail, String name, String city, String area, String address, String phone,
+    record Garage(String id, String ownerEmail, String name, String city, String area, String zip, String address, String phone,
                   String hours, String tagline, String mode, String website, boolean published,
-                  double rating, int reviews, List<Svc> services) {}
+                  double rating, int reviews, List<Svc> services, String approval, String reviewNote,
+                  Map<String, String> theme) {
+        /** Convenience for garages that need no review (samples). */
+        Garage(String id, String ownerEmail, String name, String city, String area, String zip, String address, String phone,
+               String hours, String tagline, String mode, String website, boolean published,
+               double rating, int reviews, List<Svc> services) {
+            this(id, ownerEmail, name, city, area, zip, address, phone, hours, tagline, mode, website, published,
+                    rating, reviews, services, APPROVED, "", DEFAULT_THEME);
+        }
+
+        /** Visible to drivers and bookable: the owner published it and an admin approved it. */
+        boolean live() { return published && APPROVED.equals(approval); }
+    }
+
+    /** Look of the garage's own page: accent colour, light/dark, font style, a headline and one line about the garage. */
+    static final Map<String, String> DEFAULT_THEME = Map.of("accent", "#ff6a1a", "mode", "dark", "font", "modern", "headline", "", "about", "");
+    private static final Set<String> FONTS = Set.of("modern", "classic", "rounded");
+    private static final Pattern HEX = Pattern.compile("^#[0-9a-fA-F]{6}$");
+
+    static Map<String, String> parseTheme(Object raw, Map<String, String> fallback) {
+        if (!(raw instanceof Map<?, ?> m)) return fallback;
+        @SuppressWarnings("unchecked") Map<String, Object> b = (Map<String, Object>) m;
+        String accent = b.get("accent") instanceof String x ? x.trim() : fallback.get("accent");
+        if (!HEX.matcher(accent).matches()) throw new Invalid("Pick a valid accent colour.");
+        String mode = b.get("mode") instanceof String x ? x : fallback.get("mode");
+        if (!mode.equals("light") && !mode.equals("dark")) throw new Invalid("Theme must be light or dark.");
+        String font = b.get("font") instanceof String x ? x : fallback.get("font");
+        if (!FONTS.contains(font)) throw new Invalid("Unknown font style.");
+        String headline = str(b, "headline", "Headline", 0, 80, false);
+        String about = str(b, "about", "About line", 0, 200, false);
+        return Map.of("accent", accent.toLowerCase(Locale.ROOT), "mode", mode, "font", font, "headline", headline, "about", about);
+    }
+
+    static final String APPROVED = "approved";
+    static final String PENDING = "pending";
+    static final String REJECTED = "rejected";
 
     static final String MODE_LISTING = "listing";   // we host the garage's services and prices
     static final String MODE_WEBSITE = "website";   // we link customers to the garage's own website
 
     private static final int MAX_SERVICES = 20;
     private static final Pattern PHONE = Pattern.compile("^[0-9+()\\-.\\s]{7,25}$");
+    static final Pattern ZIP = Pattern.compile("^\\d{5}$");
+    private static final Pattern ZIP_IN_TEXT = Pattern.compile("\\b(\\d{5})(?:-\\d{4})?\\b");
+
+    /** Nearness levels for a ZIP search: same ZIP, same first 4 digits, same first 3 digits (USPS sectional centre). */
+    private static final String[] NEARNESS = {"Same ZIP code", "Nearby", "Same wider area"};
+
+    /** ZIP for records saved before ZIP existed: take it from the address if one is written there, else empty. */
+    static String zipFromAddress(String address) {
+        java.util.regex.Matcher m = ZIP_IN_TEXT.matcher(address == null ? "" : address);
+        String last = "";
+        while (m.find()) last = m.group(1);
+        return last;
+    }
 
     /** Service catalog: id -> {name, description}. */
     private static final Map<String, String[]> CATALOG = new LinkedHashMap<>();
@@ -76,10 +124,42 @@ final class GarageStore {
         return out;
     }
 
-    /** Published garages with the services they offer, but no prices. */
-    synchronized List<Object> publicList() {
+    /**
+     * Published garages near a location, with the services they offer but no prices.
+     * By ZIP: range "exact" = same ZIP, "near" = same first 4 digits (default), "wide" = same first 3 digits.
+     * By city: case-insensitive match on the garage's city or neighbourhood. Closest matches come first.
+     */
+    synchronized List<Object> publicList(String zip, String range, String city) {
+        boolean byZip = zip != null && ZIP.matcher(zip).matches();
+        String c = city == null ? "" : city.trim().toLowerCase(Locale.ROOT);
+        int maxLevel = "exact".equals(range) ? 0 : "wide".equals(range) ? 2 : 1;
+
+        record Hit(Garage g, int level) {}
+        List<Hit> hits = new ArrayList<>();
+        for (Garage g : garages.values()) {
+            if (!g.live()) continue;
+            int level = -1;
+            if (byZip) {
+                String gz = g.zip();
+                if (gz.length() == 5) {
+                    if (gz.equals(zip)) level = 0;
+                    else if (gz.startsWith(zip.substring(0, 4))) level = 1;
+                    else if (gz.startsWith(zip.substring(0, 3))) level = 2;
+                }
+            } else if (!c.isEmpty() && (g.city().toLowerCase(Locale.ROOT).contains(c) || g.area().toLowerCase(Locale.ROOT).contains(c))) {
+                level = 0;
+            }
+            if (level >= 0 && level <= maxLevel) hits.add(new Hit(g, level));
+        }
+        hits.sort(java.util.Comparator.<Hit>comparingInt(Hit::level)
+                .thenComparing((Hit h) -> -h.g().rating())
+                .thenComparing(h -> h.g().name()));
         List<Object> out = new ArrayList<>();
-        for (Garage g : garages.values()) if (g.published()) out.add(summary(g));
+        for (Hit h : hits) {
+            Map<String, Object> m = summary(h.g());
+            m.put("nearness", byZip ? NEARNESS[h.level()] : "Matches your area");
+            out.add(m);
+        }
         return out;
     }
 
@@ -88,7 +168,7 @@ final class GarageStore {
         Garage g = garages.get(id);
         if (g == null) return null;
         boolean mine = g.ownerEmail().equalsIgnoreCase(viewerEmail);
-        if (!g.published() && !mine) return null;
+        if (!g.live() && !mine) return null;
         Map<String, Object> m = full(g, false);
         m.put("mine", mine); // lets the UI hide "Book" on your own garage
         return m;
@@ -121,6 +201,8 @@ final class GarageStore {
         String name = str(b, "name", "Garage name", 2, 80, true);
         String city = str(b, "city", "City", 2, 60, true);
         String area = str(b, "area", "Neighbourhood", 0, 60, false);
+        String zip = str(b, "zip", "ZIP code", 5, 5, true);
+        if (!ZIP.matcher(zip).matches()) throw new Invalid("ZIP code must be 5 digits.");
         String address = str(b, "address", "Street address", 5, 140, true);
         String phone = str(b, "phone", "Phone number", 7, 25, true);
         if (!PHONE.matcher(phone).matches() || phone.chars().filter(Character::isDigit).count() < 7) {
@@ -142,12 +224,60 @@ final class GarageStore {
         if (published && services.isEmpty()) throw new Invalid("Add at least one service before publishing.");
 
         String id = existing != null ? existing.id() : newId(name);
-        Garage g = new Garage(id, ownerEmail.toLowerCase(Locale.ROOT), name, city, area, address, phone, hours, tagline,
+        Garage g = new Garage(id, ownerEmail.toLowerCase(Locale.ROOT), name, city, area, zip, address, phone, hours, tagline,
                 mode, website, published,
-                existing != null ? existing.rating() : 0, existing != null ? existing.reviews() : 0, services);
+                existing != null ? existing.rating() : 0, existing != null ? existing.reviews() : 0, services,
+                // New garages wait for an admin. Approved ones stay approved when edited. A rejected one goes back to review.
+                existing != null && APPROVED.equals(existing.approval()) ? APPROVED : PENDING,
+                existing != null && APPROVED.equals(existing.approval()) ? existing.reviewNote() : "",
+                parseTheme(b.get("theme"), existing != null ? existing.theme() : DEFAULT_THEME));
         garages.put(id, g);
         persist();
         return full(g, true);
+    }
+
+    // ---------- admin review ----------
+
+    /** Garages for the admin screen, optionally only one approval state. Includes owner and contact details. */
+    synchronized List<Object> adminList(String approval) {
+        List<Object> out = new ArrayList<>();
+        for (Garage g : garages.values()) {
+            if (approval != null && !approval.isEmpty() && !approval.equals(g.approval())) continue;
+            Map<String, Object> m = full(g, true);
+            m.put("ownerEmail", g.ownerEmail());
+            out.add(m);
+        }
+        // pending first
+        out.sort(java.util.Comparator.comparingInt(o -> PENDING.equals(((Map<?, ?>) o).get("approval")) ? 0 : 1));
+        return out;
+    }
+
+    synchronized int pendingCount() {
+        int n = 0;
+        for (Garage g : garages.values()) if (PENDING.equals(g.approval())) n++;
+        return n;
+    }
+
+    /** Approve or reject a garage. A note is required when rejecting so the owner knows what to fix. */
+    synchronized Map<String, Object> decide(String id, String decision, String note) throws IOException {
+        Garage g = garages.get(id);
+        if (g == null) throw new Invalid("Garage not found.");
+        String n = note == null ? "" : note.trim();
+        if (n.length() > 200) throw new Invalid("Note must be at most 200 characters.");
+        for (char c : n.toCharArray()) if (c < 0x20 || c == 0x7f) throw new Invalid("Note contains invalid characters.");
+        String state;
+        if ("approve".equals(decision)) state = APPROVED;
+        else if ("reject".equals(decision)) {
+            if (n.isEmpty()) throw new Invalid("Tell the owner why it was rejected.");
+            state = REJECTED;
+        } else throw new Invalid("Decision must be approve or reject.");
+        Garage u = new Garage(g.id(), g.ownerEmail(), g.name(), g.city(), g.area(), g.zip(), g.address(), g.phone(), g.hours(),
+                g.tagline(), g.mode(), g.website(), g.published(), g.rating(), g.reviews(), g.services(), state, n, g.theme());
+        garages.put(id, u);
+        persist();
+        Map<String, Object> m = full(u, true);
+        m.put("ownerEmail", u.ownerEmail());
+        return m;
     }
 
     // ---------- validation helpers ----------
@@ -241,7 +371,7 @@ final class GarageStore {
             ids.add(s.id());
             names.add(s.name());
         }
-        return Json.obj("id", g.id(), "name", g.name(), "city", g.city(), "area", g.area(), "rating", g.rating(),
+        return Json.obj("id", g.id(), "name", g.name(), "city", g.city(), "area", g.area(), "zip", g.zip(), "rating", g.rating(),
                 "reviews", g.reviews(), "hours", g.hours(), "tagline", g.tagline(), "mode", g.mode(),
                 "serviceIds", ids, "serviceNames", names);
     }
@@ -252,11 +382,16 @@ final class GarageStore {
             services.add(Json.obj("id", s.id(), "name", s.name(), "description", s.description(),
                     "price", s.price(), "duration", s.duration(), "badge", s.badge()));
         }
-        Map<String, Object> m = Json.obj("id", g.id(), "name", g.name(), "city", g.city(), "area", g.area(),
+        Map<String, Object> m = Json.obj("id", g.id(), "name", g.name(), "city", g.city(), "area", g.area(), "zip", g.zip(),
                 "address", g.address(), "phone", g.phone(), "rating", g.rating(), "reviews", g.reviews(),
                 "hours", g.hours(), "tagline", g.tagline(), "mode", g.mode(), "website", g.website(),
                 "services", services);
-        if (forOwner) m.put("published", g.published());
+        if (forOwner) {
+            m.put("published", g.published());
+            m.put("approval", g.approval());
+            m.put("reviewNote", g.reviewNote());
+            m.put("theme", g.theme());
+        }
         return m;
     }
 
@@ -290,13 +425,41 @@ final class GarageStore {
                         ((Number) s.get("price")).intValue(), (String) s.get("duration"), (String) s.getOrDefault("badge", "")));
             }
             Garage g = new Garage((String) m.get("id"), (String) m.getOrDefault("ownerEmail", ""), (String) m.get("name"),
-                    (String) m.get("city"), (String) m.getOrDefault("area", ""), (String) m.get("address"),
+                    (String) m.get("city"), (String) m.getOrDefault("area", ""),
+                    m.get("zip") instanceof String z && ZIP.matcher(z).matches() ? z : zipFromAddress((String) m.get("address")),
+                    (String) m.get("address"),
                     (String) m.get("phone"), (String) m.get("hours"), (String) m.getOrDefault("tagline", ""),
                     (String) m.get("mode"), (String) m.getOrDefault("website", ""), Boolean.TRUE.equals(m.get("published")),
                     ((Number) m.getOrDefault("rating", 0)).doubleValue(), ((Number) m.getOrDefault("reviews", 0)).intValue(),
-                    services);
+                    services,
+                    // Records saved before approval existed are treated as approved so existing data keeps working.
+                    m.get("approval") instanceof String a && (a.equals(PENDING) || a.equals(REJECTED)) ? a : APPROVED,
+                    (String) m.getOrDefault("reviewNote", ""),
+                    loadTheme(m.get("theme")));
             garages.put(g.id(), g);
         }
+    }
+
+    private static Map<String, String> loadTheme(Object raw) {
+        try {
+            return parseTheme(raw, DEFAULT_THEME);
+        } catch (Invalid e) {
+            return DEFAULT_THEME;
+        }
+    }
+
+    /** Public page data for a garage's own site: no prices. Visible only when live, or to its owner as a preview. */
+    synchronized Map<String, Object> siteFor(String id, String viewerEmail) {
+        Garage g = garages.get(id);
+        if (g == null) return null;
+        boolean mine = viewerEmail != null && g.ownerEmail().equalsIgnoreCase(viewerEmail);
+        if (!g.live() && !mine) return null;
+        Map<String, Object> m = summary(g);
+        m.put("address", g.address());
+        m.put("phone", g.phone());
+        m.put("theme", g.theme());
+        m.put("live", g.live());
+        return m;
     }
 
     // ---------- sample data (first run only) ----------
@@ -312,29 +475,29 @@ final class GarageStore {
 
     private static List<Garage> samples() {
         return List.of(
-                new Garage("redline", "", "Redline Auto Garage", "Seattle", "Georgetown", "1420 Industrial Way, Seattle, WA 98134",
+                new Garage("redline", "", "Redline Auto Garage", "Seattle", "Georgetown", "98134", "1420 Industrial Way, Seattle, WA 98134",
                         "(206) 555-0142", "Mon-Fri 8am-6pm, Sat 9am-3pm", "All-round independent garage with a 12-month warranty.",
                         MODE_LISTING, "", true, 4.9, 312,
                         List.of(svc("oil", 89, "45 min", "Most popular"), svc("brakes", 189, "1.5 hrs"), svc("tires", 59, "40 min"),
                                 svc("battery", 129, "30 min"), svc("ac", 149, "1 hr"), svc("engine", 99, "1 hr"),
                                 svc("align", 109, "1 hr"), svc("full", 349, "3 hrs", "Best value"))),
-                new Garage("rainier", "", "Rainier Motor Works", "Seattle", "Beacon Hill", "815 S Spokane St, Seattle, WA 98108",
+                new Garage("rainier", "", "Rainier Motor Works", "Seattle", "Beacon Hill", "98108", "815 S Spokane St, Seattle, WA 98108",
                         "(206) 555-0177", "Mon-Fri 7:30am-5:30pm", "Diagnostics and engine specialists for domestic and import cars.",
                         MODE_LISTING, "", true, 4.7, 198,
                         List.of(svc("engine", 89, "1 hr", "Specialty"), svc("oil", 79, "40 min"), svc("brakes", 169, "1.5 hrs"),
                                 svc("inspection", 149, "2 hrs"), svc("battery", 119, "30 min"), svc("full", 319, "3 hrs"))),
-                new Garage("emerald", "", "Emerald City Auto Care", "Seattle", "Capitol Hill", "1105 E Pike St, Seattle, WA 98122",
+                new Garage("emerald", "", "Emerald City Auto Care", "Seattle", "Capitol Hill", "98122", "1105 E Pike St, Seattle, WA 98122",
                         "(206) 555-0128", "Mon-Sat 8am-6pm", "Hybrid and EV-friendly shop with loaner bikes while you wait.",
                         MODE_LISTING, "", true, 4.8, 254,
                         List.of(svc("ev", 129, "1.5 hrs", "EV specialist"), svc("oil", 95, "45 min"), svc("tires", 65, "40 min"),
                                 svc("ac", 159, "1 hr"), svc("align", 119, "1 hr"), svc("inspection", 159, "2 hrs"),
                                 svc("full", 369, "3 hrs", "Best value"))),
-                new Garage("lakeside", "", "Lakeside Tire & Brake", "Seattle", "Ballard", "5630 24th Ave NW, Seattle, WA 98107",
+                new Garage("lakeside", "", "Lakeside Tire & Brake", "Seattle", "Ballard", "98107", "5630 24th Ave NW, Seattle, WA 98107",
                         "(206) 555-0163", "Mon-Sat 8am-5pm", "Tires, brakes and alignment done fast, often while you wait.",
                         MODE_LISTING, "", true, 4.6, 141,
                         List.of(svc("tires", 49, "30 min", "Most popular"), svc("brakes", 159, "1.25 hrs"), svc("align", 95, "1 hr"),
                                 svc("battery", 109, "25 min"))),
-                new Garage("northgate", "", "Northgate Quick Lube & Service", "Seattle", "Northgate", "10315 5th Ave NE, Seattle, WA 98125",
+                new Garage("northgate", "", "Northgate Quick Lube & Service", "Seattle", "Northgate", "98125", "10315 5th Ave NE, Seattle, WA 98125",
                         "(206) 555-0191", "Daily 7am-7pm, no appointment needed", "Quick, no-appointment maintenance seven days a week.",
                         MODE_LISTING, "", true, 4.5, 409,
                         List.of(svc("oil", 69, "25 min", "Fastest"), svc("tires", 45, "30 min"), svc("battery", 99, "20 min"),

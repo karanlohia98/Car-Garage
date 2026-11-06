@@ -3,3 +3,5 @@ frontend/dist/
 backend/out/
 *.log
 .DS_Store
+admin-credentials.txt
+backend/admin-credentials.txt

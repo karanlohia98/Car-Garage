@@ -23,6 +23,8 @@ ENV HOST=0.0.0.0 \
     DATA_FILE=/data/users.tsv \
     GARAGES_FILE=/data/garages.json \
     APPOINTMENTS_FILE=/data/appointments.json \
+    ADMIN_FILE=/data/admin.json \
+    ADMIN_CREDENTIALS_FILE=/data/admin-credentials.txt \
     SEED_SAMPLES=false
 # Accounts, garages and appointments live here: mount a persistent volume or they are lost when the container is replaced.
 VOLUME /data

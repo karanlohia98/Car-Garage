@@ -83,7 +83,8 @@ final class AppointmentStore {
         String garageName;
         String customerEmail;
         String customerName;
-        String vehicle;
+        String vehicle;   // car make and model
+        String plate = ""; // number plate (empty on bookings made before it existed)
         String date;
         String time;
         String notes;
@@ -116,7 +117,7 @@ final class AppointmentStore {
             throws IOException {
         String garageId = b.get("garageId") instanceof String s ? s : "";
         GarageStore.Garage g = gs.find(garageId);
-        if (g == null || !g.published()) throw new NotFound("Garage not found.");
+        if (g == null || !g.live()) throw new NotFound("Garage not found.");
         if (g.ownerEmail().equalsIgnoreCase(customerEmail)) {
             throw new GarageStore.Invalid("You can't book an appointment at your own garage.");
         }
@@ -139,8 +140,12 @@ final class AppointmentStore {
             if (seen.add(id)) lines.add(new Line(svc.name(), g.mode().equals(GarageStore.MODE_LISTING) ? svc.price() : 0));
         }
 
-        String vehicle = text(b, "vehicle", "Vehicle", 2, 80, true, false);
-        String notes = text(b, "notes", "Notes", 0, 500, false, true);
+        String vehicle = text(b, "vehicle", "Car make and model", 2, 60, true, false);
+        String plate = text(b, "plate", "Number plate", 2, 10, true, false).toUpperCase(java.util.Locale.ROOT);
+        if (!plate.matches("[A-Z0-9][A-Z0-9 -]{0,9}") || plate.replaceAll("[ -]", "").length() < 2) {
+            throw new GarageStore.Invalid("Number plate can only contain letters, numbers, spaces and dashes.");
+        }
+        String notes = text(b, "notes", "Note for the garage", 0, 120, false, false);
         String date = b.get("date") instanceof String s ? s.trim() : "";
         String time = b.get("time") instanceof String s ? s.trim() : "";
         try {
@@ -161,6 +166,7 @@ final class AppointmentStore {
         a.customerEmail = customerEmail.toLowerCase();
         a.customerName = customerName;
         a.vehicle = vehicle;
+        a.plate = plate;
         a.date = date;
         a.time = time;
         a.notes = notes;
@@ -213,7 +219,7 @@ final class AppointmentStore {
         if (!OPEN.contains(a.status) && !a.status.equals(COMPLETED)) {
             throw new GarageStore.Invalid("This appointment is closed, so messages can't be added.");
         }
-        String body = text(b, "text", "Message", 1, 1000, true, true);
+        String body = text(b, "text", "Message", 1, 300, true, false);
         if (a.messages.size() >= MAX_MESSAGES) throw new GarageStore.Invalid("This conversation has reached its message limit.");
         addMessage(a, role, body, role);
         a.updatedAt = Instant.now().toString();
@@ -230,7 +236,7 @@ final class AppointmentStore {
         if (!rules.getOrDefault(a.status, List.of()).contains(next)) {
             throw new Denied("You can't change an appointment from \"" + label(a.status) + "\" to \"" + label(next) + "\".");
         }
-        String note = text(b, "note", "Note", 0, 1000, false, true);
+        String note = text(b, "note", "Note", 0, 200, false, false);
         if (a.messages.size() + 2 > MAX_MESSAGES) throw new GarageStore.Invalid("This conversation has reached its message limit.");
 
         a.status = next;
@@ -296,7 +302,7 @@ final class AppointmentStore {
             List<Object> names = new ArrayList<>();
             for (Line l : a.services) names.add(l.name());
             out.add(Json.obj("id", a.id, "garageId", a.garageId, "garageName", a.garageName,
-                    "customerName", a.customerName, "vehicle", a.vehicle, "date", a.date, "time", a.time,
+                    "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time,
                     "status", a.status, "statusLabel", label(a.status), "services", names, "total", total(a),
                     "unread", role.equals("customer") ? a.unreadCustomer : a.unreadGarage, "updatedAt", a.updatedAt));
         }
@@ -313,7 +319,7 @@ final class AppointmentStore {
         for (String s : allowed) actions.add(Json.obj("status", s, "label", label(s)));
         return Json.obj("id", a.id, "role", role, "garageId", a.garageId, "garageName", a.garageName,
                 "garagePhone", g == null ? "" : g.phone(), "garageAddress", g == null ? "" : g.address(),
-                "customerName", a.customerName, "vehicle", a.vehicle, "date", a.date, "time", a.time, "notes", a.notes,
+                "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time, "notes", a.notes,
                 "status", a.status, "statusLabel", label(a.status), "services", services, "total", total(a),
                 "createdAt", a.createdAt, "updatedAt", a.updatedAt, "messages", messages, "actions", actions,
                 "canChat", OPEN.contains(a.status) || a.status.equals(COMPLETED));
@@ -329,7 +335,7 @@ final class AppointmentStore {
             List<Object> messages = new ArrayList<>();
             for (Msg m : a.messages) messages.add(Json.obj("from", m.from(), "name", m.name(), "text", m.text(), "at", m.at()));
             all.add(Json.obj("id", a.id, "garageId", a.garageId, "garageName", a.garageName,
-                    "customerEmail", a.customerEmail, "customerName", a.customerName, "vehicle", a.vehicle,
+                    "customerEmail", a.customerEmail, "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate,
                     "date", a.date, "time", a.time, "notes", a.notes, "status", a.status,
                     "createdAt", a.createdAt, "updatedAt", a.updatedAt, "services", services, "messages", messages,
                     "unreadCustomer", a.unreadCustomer, "unreadGarage", a.unreadGarage));
@@ -355,6 +361,7 @@ final class AppointmentStore {
             a.customerEmail = (String) m.get("customerEmail");
             a.customerName = (String) m.get("customerName");
             a.vehicle = (String) m.get("vehicle");
+            a.plate = (String) m.getOrDefault("plate", "");
             a.date = (String) m.get("date");
             a.time = (String) m.get("time");
             a.notes = (String) m.getOrDefault("notes", "");

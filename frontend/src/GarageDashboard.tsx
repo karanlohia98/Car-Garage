@@ -9,9 +9,10 @@ import {
   FaTrash,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { CatalogItem, GarageInput, OwnerGarage, PricingMode, User } from './api';
+import type { CatalogItem, GarageInput, OwnerGarage, PricingMode, Theme, User } from './api';
 import { AppointmentsWorkspace } from './Appointments';
 import { fullAddress, iconFor, isCustomService, isHttpUrl } from './shared';
+import { themeVars } from './SitePage';
 
 interface ServiceRow {
   key: string;
@@ -26,17 +27,19 @@ interface Answers {
   name: string;
   city: string;
   area: string;
+  zip: string;
   address: string;
   phone: string;
   hours: string;
   tagline: string;
   mode: PricingMode | '';
   website: string;
+  theme: Theme;
   services: ServiceRow[];
 }
 
 const EMPTY: Answers = {
-  name: '', city: '', area: '', address: '', phone: '', hours: '', tagline: '', mode: '', website: '', services: [],
+  name: '', city: '', area: '', zip: '', address: '', phone: '', hours: '', tagline: '', mode: '', website: '', theme: api.DEFAULT_THEME, services: [],
 };
 
 let rowCounter = 0;
@@ -46,12 +49,14 @@ const fromGarage = (g: OwnerGarage): Answers => ({
   name: g.name,
   city: g.city,
   area: g.area,
+  zip: g.zip,
   address: g.address,
   phone: g.phone,
   hours: g.hours,
   tagline: g.tagline,
   mode: g.mode,
   website: g.website,
+  theme: g.theme ?? api.DEFAULT_THEME,
   services: g.services.map((s) => ({
     key: nextKey(),
     id: isCustomService(s.id) ? '' : s.id,
@@ -66,6 +71,7 @@ const toInput = (a: Answers, published: boolean): GarageInput => ({
   name: a.name,
   city: a.city,
   area: a.area,
+  zip: a.zip,
   address: a.address,
   phone: a.phone,
   hours: a.hours,
@@ -73,6 +79,7 @@ const toInput = (a: Answers, published: boolean): GarageInput => ({
   mode: (a.mode || 'listing') as PricingMode,
   website: a.website,
   published,
+  theme: a.theme,
   services: a.services.map((s) => {
     const base = { id: s.id, duration: s.duration };
     const price = a.mode === 'listing' && s.price.trim() !== '' ? Number(s.price) : undefined;
@@ -80,7 +87,32 @@ const toInput = (a: Answers, published: boolean): GarageInput => ({
   }),
 });
 
-const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Review & publish'] as const;
+const DAY_OPTIONS = ['Mon-Fri', 'Mon-Sat', 'Mon-Sun', 'Tue-Sat', 'Sat-Sun', 'Daily'];
+const TIMES = Array.from({ length: 29 }, (_, i) => {
+  const mins = 5 * 60 + i * 30;
+  const h = Math.floor(mins / 60);
+  return `${h % 12 === 0 ? 12 : h % 12}:${mins % 60 === 0 ? '00' : '30'} ${h < 12 ? 'AM' : 'PM'}`;
+});
+const DURATIONS = ['15 min', '30 min', '45 min', '1 hr', '1.5 hrs', '2 hrs', '3 hrs', 'Half a day', 'Full day'];
+
+/** Opening hours are picked from lists, then saved as one readable line: "Mon-Fri, 8:00 AM - 6:00 PM". */
+const composeHours = (days: string, open: string, close: string) => `${days}, ${open} - ${close}`;
+const parseHours = (h: string): { days: string; open: string; close: string } | null => {
+  const m = /^(.+?), (\d{1,2}:\d{2} [AP]M) - (\d{1,2}:\d{2} [AP]M)$/.exec(h);
+  return m && DAY_OPTIONS.includes(m[1]) && TIMES.includes(m[2]) && TIMES.includes(m[3]) ? { days: m[1], open: m[2], close: m[3] } : null;
+};
+
+const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Your page', 'Review & publish'] as const;
+
+/** One-sentence explanation shown under each step heading. */
+const STEP_HELP = [
+  'This is how your garage is named in the directory. Customers see your name first, so use the name on your sign.',
+  'Drivers search by ZIP code, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.',
+  'Pick one. You can switch later. Customers must be signed in to see prices either way.',
+  'Choose what you offer. Customers pick from this list when they book, so only tick services you can actually do.',
+  'Every garage gets its own web page you can share as your website. Choose how it looks; the preview updates as you go.',
+  'Check everything below. New garages are reviewed by our team before they appear in the directory, usually within a day.',
+] as const;
 
 /** Returns an error message for the given step, or null if it is complete. */
 function validateStep(step: number, a: Answers): string | null {
@@ -89,6 +121,7 @@ function validateStep(step: number, a: Answers): string | null {
       return a.name.trim().length < 2 ? 'Please enter your garage name.' : null;
     case 1:
       if (a.city.trim().length < 2) return 'Please enter your city.';
+      if (!/^\d{5}$/.test(a.zip.trim())) return 'Please enter your 5-digit ZIP code. Drivers find you by ZIP.';
       if (a.address.trim().length < 5) return 'Please enter your street address.';
       if (a.phone.replace(/\D/g, '').length < 7) return 'Please enter a valid phone number.';
       if (a.hours.trim().length < 2) return 'Please tell customers your opening hours.';
@@ -224,22 +257,57 @@ export default function GarageDashboard(props: {
   );
 }
 
+function ApprovalStatus(props: { garage: OwnerGarage; onTogglePublish: () => void }) {
+  const { garage, onTogglePublish } = props;
+  if (!garage.zip) {
+    return (
+      <div className="status draft" role="status">
+        Add your ZIP code so drivers nearby can find you. Choose <b>Edit my answers</b>, then <b>Where &amp; when</b>.
+      </div>
+    );
+  }
+  if (garage.approval === 'rejected') {
+    return (
+      <div className="status rejected" role="status">
+        Not approved yet: <b>{garage.reviewNote || 'please check your details'}</b>. Edit your answers and submit again.
+      </div>
+    );
+  }
+  if (garage.approval === 'pending') {
+    return (
+      <div className="status pending" role="status">
+        {garage.published ? (
+          <>Waiting for approval. Our team is checking your garage; you will go live as soon as it is approved.</>
+        ) : (
+          <>Saved as a draft. Publish it to send it for approval.</>
+        )}
+        <button className="btn btn-ghost" onClick={onTogglePublish}>
+          {garage.published ? 'Withdraw' : 'Submit for review'}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className={`status ${garage.published ? 'live' : 'draft'}`} role="status">
+      {garage.published ? (
+        <>
+          <FaCheckCircle /> Approved and <b>live</b> in the directory.
+        </>
+      ) : (
+        <>Approved, but unpublished: customers can&apos;t see it.</>
+      )}
+      <button className="btn btn-ghost" onClick={onTogglePublish}>
+        {garage.published ? 'Unpublish' : 'Publish now'}
+      </button>
+    </div>
+  );
+}
+
 function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onTogglePublish: () => void }) {
   const { garage, onEdit, onTogglePublish } = props;
   return (
     <div className="my-garage">
-      <div className={`status ${garage.published ? 'live' : 'draft'}`} role="status">
-        {garage.published ? (
-          <>
-            <FaCheckCircle /> Your garage is <b>live</b> in the directory.
-          </>
-        ) : (
-          <>Your garage is a <b>draft</b>: customers can&apos;t see it yet.</>
-        )}
-        <button className="btn btn-ghost" onClick={onTogglePublish}>
-          {garage.published ? 'Unpublish' : 'Publish now'}
-        </button>
-      </div>
+      <ApprovalStatus garage={garage} onTogglePublish={onTogglePublish} />
 
       <div className="detail-head">
         <div>
@@ -258,6 +326,11 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
           </li>
         </ul>
       </div>
+
+      <p className="page-link">
+        Your own web page: <a href={`/g/${garage.id}`} target="_blank" rel="noopener noreferrer">{window.location.origin}/g/{garage.id}</a>
+        {garage.approval !== 'approved' || !garage.published ? <small className="hint"> (only you can see it until it is approved and published)</small> : null}
+      </p>
 
       <p className="mode-line">
         {garage.mode === 'website' ? (
@@ -294,7 +367,7 @@ function Wizard(props: {
   onSessionExpired: () => void;
 }) {
   const { initial, isNew, wasPublished, onSaved, onCancel, onSessionExpired } = props;
-  const [a, setA] = useState<Answers>(initial);
+  const [a, setA] = useState<Answers>(() => ({ ...initial, hours: parseHours(initial.hours) ? initial.hours : '' }));
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -303,6 +376,16 @@ function Wizard(props: {
   useEffect(() => {
     api.fetchCatalog().then((r) => setCatalog(r.services)).catch(() => setCatalog([]));
   }, []);
+
+  const [hrs, setHrs] = useState(() => parseHours(initial.hours) ?? { days: 'Mon-Fri', open: '8:00 AM', close: '6:00 PM' });
+  const setHours = (h: { days: string; open: string; close: string }) => {
+    setHrs(h);
+    setA((prev) => ({ ...prev, hours: composeHours(h.days, h.open, h.close) }));
+  };
+  // Make sure the picked defaults are what gets saved even if the owner never touches the lists.
+  useEffect(() => {
+    setA((prev) => (prev.hours ? prev : { ...prev, hours: composeHours(hrs.days, hrs.open, hrs.close) }));
+  }, [hrs]);
 
   const set = <K extends keyof Answers>(k: K, v: Answers[K]) => setA((prev) => ({ ...prev, [k]: v }));
 
@@ -329,7 +412,7 @@ function Wizard(props: {
   };
 
   const save = async (publish: boolean) => {
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const msg = validateStep(i, a);
       if (msg) {
         setStep(i);
@@ -362,21 +445,24 @@ function Wizard(props: {
 
       <div className="wizard-card">
         <h3>{STEPS[step]}</h3>
+        <p className="step-help">{STEP_HELP[step]}</p>
 
         {step === 0 && (
           <div className="qa">
             <label>
-              What is your garage called?
-              <input value={a.name} onChange={(e) => set('name', e.target.value)} maxLength={80} autoFocus />
+              Garage name
+              <input value={a.name} onChange={(e) => set('name', e.target.value)} maxLength={80} autoFocus placeholder="e.g. Redline Auto Garage" />
+              <small className="hint">Shown as the title of your listing.</small>
             </label>
             <label>
-              Describe your garage in one line <small>(optional)</small>
+              Short tagline <small>(optional)</small>
               <input
                 value={a.tagline}
                 onChange={(e) => set('tagline', e.target.value)}
                 maxLength={140}
                 placeholder="e.g. Family-run since 1998, all makes and models"
               />
+              <small className="hint">One line, up to 140 characters. Appears under your name on the garage card.</small>
             </label>
           </div>
         )}
@@ -385,33 +471,63 @@ function Wizard(props: {
           <div className="qa">
             <div className="two">
               <label>
-                Which city are you in?
-                <input value={a.city} onChange={(e) => set('city', e.target.value)} maxLength={60} autoFocus />
+                City
+                <input value={a.city} onChange={(e) => set('city', e.target.value)} maxLength={60} autoFocus placeholder="e.g. Seattle" />
+              </label>
+              <label>
+                ZIP code
+                <input
+                  value={a.zip}
+                  onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  inputMode="numeric"
+                  maxLength={5}
+                  placeholder="e.g. 98108"
+                  autoComplete="postal-code"
+                />
+                <small className="hint">Drivers within your area see you when they search this ZIP.</small>
+              </label>
+            </div>
+            <div className="two">
+              <label>
+                Street address
+                <input value={a.address} onChange={(e) => set('address', e.target.value)} maxLength={140} placeholder="e.g. 815 S Spokane St" autoComplete="street-address" />
               </label>
               <label>
                 Neighbourhood <small>(optional)</small>
-                <input value={a.area} onChange={(e) => set('area', e.target.value)} maxLength={60} />
+                <input value={a.area} onChange={(e) => set('area', e.target.value)} maxLength={60} placeholder="e.g. Beacon Hill" />
               </label>
             </div>
             <label>
-              What&apos;s your street address?
-              <input value={a.address} onChange={(e) => set('address', e.target.value)} maxLength={140} />
+              Phone number
+              <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" placeholder="e.g. (206) 555-0142" autoComplete="tel" />
+              <small className="hint">Customers call this number about their booking.</small>
             </label>
-            <div className="two">
-              <label>
-                Phone number for bookings
-                <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" />
-              </label>
-              <label>
-                When are you open?
-                <input
-                  value={a.hours}
-                  onChange={(e) => set('hours', e.target.value)}
-                  maxLength={80}
-                  placeholder="Mon-Fri 8am-6pm, Sat 9am-3pm"
-                />
-              </label>
-            </div>
+            <fieldset className="hours">
+              <legend>Opening hours</legend>
+              <div className="three">
+                <label>
+                  Days
+                  <select value={hrs.days} onChange={(e) => setHours({ ...hrs, days: e.target.value })}>
+                    {DAY_OPTIONS.map((d) => <option key={d}>{d}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Opens
+                  <select value={hrs.open} onChange={(e) => setHours({ ...hrs, open: e.target.value })}>
+                    {TIMES.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Closes
+                  <select value={hrs.close} onChange={(e) => setHours({ ...hrs, close: e.target.value })}>
+                    {TIMES.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+              </div>
+              {!parseHours(initial.hours) && initial.hours && (
+                <small className="hint">Your earlier hours were &ldquo;{initial.hours}&rdquo;. Pick them again above.</small>
+              )}
+            </fieldset>
           </div>
         )}
 
@@ -439,7 +555,8 @@ function Wizard(props: {
             </div>
             {a.mode === 'website' && (
               <label>
-                What&apos;s your website address?
+                Website address
+                <small className="hint">The page where customers can see your prices.</small>
                 <input
                   type="url"
                   value={a.website}
@@ -504,14 +621,17 @@ function Wizard(props: {
                         />
                       </label>
                     )}
-                    <input
+                    <select
                       className="dur"
                       value={s.duration}
                       onChange={(e) => updateRow(s.key, { duration: e.target.value })}
-                      placeholder="e.g. 1 hr"
                       aria-label={`Time for ${s.name || 'custom service'}`}
-                      maxLength={20}
-                    />
+                    >
+                      <option value="">How long?</option>
+                      {(s.duration && !DURATIONS.includes(s.duration) ? [s.duration, ...DURATIONS] : DURATIONS).map((d) => (
+                        <option key={d}>{d}</option>
+                      ))}
+                    </select>
                     {!s.id && (
                       <button
                         type="button"
@@ -533,12 +653,81 @@ function Wizard(props: {
         )}
 
         {step === 4 && (
+          <div className="qa">
+            <div>
+              <b>Colour</b>
+              <div className="swatches" role="group" aria-label="Accent colour">
+                {['#ff6a1a', '#e11d48', '#2563eb', '#0d9488', '#16a34a', '#7c3aed', '#ca8a04', '#111827'].map((c) => (
+                  <button
+                    type="button"
+                    key={c}
+                    className={`swatch ${a.theme.accent === c ? 'on' : ''}`}
+                    style={{ background: c }}
+                    aria-label={`Accent ${c}`}
+                    aria-pressed={a.theme.accent === c}
+                    onClick={() => set('theme', { ...a.theme, accent: c })}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={a.theme.accent}
+                  onChange={(e) => set('theme', { ...a.theme, accent: e.target.value })}
+                  aria-label="Custom colour"
+                  style={{ width: 44, height: 36, padding: 2 }}
+                />
+              </div>
+            </div>
+            <div className="two">
+              <div>
+                <b>Background</b>
+                <div className="seg" role="group" aria-label="Light or dark">
+                  {(['dark', 'light'] as const).map((m) => (
+                    <button type="button" key={m} className={a.theme.mode === m ? 'on' : ''} onClick={() => set('theme', { ...a.theme, mode: m })}>
+                      {m === 'dark' ? 'Dark' : 'Light'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <b>Font style</b>
+                <div className="seg" role="group" aria-label="Font style">
+                  {(['modern', 'classic', 'rounded'] as const).map((f) => (
+                    <button type="button" key={f} className={a.theme.font === f ? 'on' : ''} onClick={() => set('theme', { ...a.theme, font: f })}>
+                      {f[0].toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <label>
+              Headline <small>(optional)</small>
+              <input value={a.theme.headline} onChange={(e) => set('theme', { ...a.theme, headline: e.target.value })} maxLength={80} placeholder={a.name || 'e.g. Honest repairs, fair prices'} />
+              <small className="hint">Big text at the top of your page. Defaults to your garage name.</small>
+            </label>
+            <label>
+              About your garage <small>(optional)</small>
+              <input value={a.theme.about} onChange={(e) => set('theme', { ...a.theme, about: e.target.value })} maxLength={200} placeholder="e.g. Family-run since 1998, all makes and models" />
+              <small className="hint">One or two sentences under the headline, up to 200 characters.</small>
+            </label>
+            <div className="site theme-preview" style={themeVars(a.theme)} aria-label="Preview of your page">
+              <div className="site-hero" style={{ padding: '28px 22px' }}>
+                <h1 style={{ fontSize: '1.7rem' }}>{a.theme.headline || a.name || 'Your garage'}</h1>
+                <p className="s-lead" style={{ fontSize: '.95rem' }}>{a.theme.about || a.tagline || 'Your short description appears here.'}</p>
+                <span className="site-btn">See our services</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 5 && (
           <div className="qa review">
             <dl>
               <dt>Garage</dt>
               <dd>{a.name}</dd>
               <dt>Location</dt>
-              <dd>{fullAddress(a)}</dd>
+              <dd>
+                {fullAddress(a)} {a.zip}
+              </dd>
               <dt>Phone &amp; hours</dt>
               <dd>
                 {a.phone} &middot; {a.hours}
@@ -553,7 +742,9 @@ function Wizard(props: {
               </dd>
             </dl>
             <p className="muted">
-              Publishing puts your garage in the public directory. You can unpublish or edit it whenever you like.
+              {isNew || !wasPublished
+                ? 'After you publish, our team checks your garage. Once approved, it appears for drivers in your ZIP area. You can edit it any time.'
+                : 'You are live. Changes are saved straight away.'}
             </p>
           </div>
         )}
@@ -588,7 +779,7 @@ function Wizard(props: {
                 </button>
               )}
               <button className="btn btn-primary" onClick={() => save(true)} disabled={busy}>
-                {busy ? 'Saving...' : wasPublished ? 'Save & keep live' : 'Publish my garage'}
+                {busy ? 'Saving...' : wasPublished ? 'Save & keep live' : 'Submit for review'}
               </button>
             </div>
           )}
