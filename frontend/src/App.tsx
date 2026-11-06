@@ -11,17 +11,22 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { GarageDetail, GarageSummary, Role, User } from './api';
+import type { GarageDetail, GarageSummary, User } from './api';
 import GarageDashboard from './GarageDashboard';
 import { Stars, formatPlace, fullAddress, iconFor, isHttpUrl, scrollToId } from './shared';
 
 type AuthMode = 'login' | 'signup';
+/** What the visitor was trying to do when they were asked to sign in. */
+type Intent = 'driver' | 'garage';
+/** Which side of the site a signed-in user is looking at. One account can use both. */
+type View = 'driver' | 'garage';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState<boolean>(!!api.getToken());
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
-  const [authRole, setAuthRole] = useState<Role>('customer');
+  const [authIntent, setAuthIntent] = useState<Intent>('driver');
+  const [view, setView] = useState<View>('driver');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Garage the visitor clicked before signing in; opened right after they authenticate.
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -49,9 +54,21 @@ export default function App() {
       .finally(() => setChecking(false));
   }, []);
 
-  const openAuth = (mode: AuthMode, role: Role = 'customer') => {
-    setAuthRole(role);
+  const openAuth = (mode: AuthMode, intent: Intent = 'driver') => {
+    setAuthIntent(intent);
     setAuthMode(mode);
+  };
+
+  const switchView = (v: View) => {
+    setView(v);
+    if (v === 'driver') loadGarages(); // pick up a garage that was just published or changed
+    window.scrollTo({ top: 0 });
+  };
+
+  /** "List my garage" buttons: signed-in users go straight to their garage screen. */
+  const startGarage = () => {
+    if (user) switchView('garage');
+    else openAuth('signup', 'garage');
   };
 
   const handleAuthed = (token: string, u: User) => {
@@ -59,14 +76,17 @@ export default function App() {
     setUser(u);
     setAuthMode(null);
     loadGarages(); // pick up any change (e.g. a garage just published)
-    if (u.role === 'garage') {
+    if (authIntent === 'garage') {
       setPendingId(null);
-      scrollToId('dashboard');
+      setView('garage');
+      window.scrollTo({ top: 0 });
     } else if (pendingId) {
+      setView('driver');
       setSelectedId(pendingId);
       setPendingId(null);
       scrollToId('garage-detail');
     } else {
+      setView('driver');
       scrollToId('garages');
     }
   };
@@ -80,12 +100,13 @@ export default function App() {
     api.setToken(null);
     setUser(null);
     setSelectedId(null);
+    setView('driver');
   }, []);
 
   const handleSelect = (id: string) => {
     if (!user) {
       setPendingId(id);
-      openAuth('signup');
+      openAuth('signup', 'driver');
       return;
     }
     setSelectedId(id);
@@ -97,16 +118,27 @@ export default function App() {
     setPendingId(null);
   };
 
-  const isGarage = user?.role === 'garage';
+  const showGarageView = !!user && view === 'garage';
   const selected = garages?.find((g) => g.id === selectedId) ?? null;
   const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
   return (
     <>
-      <Header user={user} checking={checking} onAuth={openAuth} onLogout={handleLogout} />
+      <Header
+        user={user}
+        checking={checking}
+        view={view}
+        onView={switchView}
+        onAuth={openAuth}
+        onLogout={handleLogout}
+      />
       <main>
-        {isGarage && user ? (
-          <GarageDashboard user={user} onSessionExpired={handleLogout} />
+        {showGarageView && user ? (
+          <GarageDashboard
+            user={user}
+            onSessionExpired={handleLogout}
+            onGarageCreated={() => setUser((u) => (u ? { ...u, hasGarage: true } : u))}
+          />
         ) : (
           <>
             <Hero user={user} onAuth={openAuth} />
@@ -132,7 +164,7 @@ export default function App() {
               />
             )}
             <Process />
-            {!user && <ForGarages onAuth={openAuth} />}
+            {!user?.hasGarage && <ForGarages signedIn={!!user} onStart={startGarage} onLogin={() => openAuth('login', 'garage')} />}
           </>
         )}
       </main>
@@ -145,7 +177,7 @@ export default function App() {
       {authMode && (
         <AuthModal
           mode={authMode}
-          initialRole={authRole}
+          intent={authIntent}
           pendingName={pending?.name ?? null}
           onMode={setAuthMode}
           onClose={closeAuth}
@@ -159,11 +191,13 @@ export default function App() {
 function Header(props: {
   user: User | null;
   checking: boolean;
-  onAuth: (m: AuthMode, role?: Role) => void;
+  view: View;
+  onView: (v: View) => void;
+  onAuth: (m: AuthMode, intent?: Intent) => void;
   onLogout: () => void;
 }) {
-  const { user, checking, onAuth, onLogout } = props;
-  const isGarage = user?.role === 'garage';
+  const { user, checking, view, onView, onAuth, onLogout } = props;
+  const garageView = !!user && view === 'garage';
   return (
     <header className="header">
       <div className="wrap header-inner">
@@ -177,23 +211,26 @@ function Header(props: {
           </span>
         </a>
         <nav className="nav" aria-label="Main">
-          {isGarage ? (
-            <a href="#dashboard">My garage</a>
-          ) : (
+          {!garageView && (
             <>
               <a href="#garages">Garages</a>
               <a href="#process">How it works</a>
-              {!user && <a href="#for-garages">For garages</a>}
+              {!user?.hasGarage && <a href="#for-garages">For garages</a>}
             </>
           )}
         </nav>
         <div className="auth-actions">
           {checking ? null : user ? (
             <>
-              <span className="hello">
-                {isGarage && <span className="role-pill">Garage</span>}
-                Hi, {user.name.split(' ')[0]}
-              </span>
+              <div className="view-switch" role="group" aria-label="Switch view">
+                <button className={view === 'driver' ? 'on' : ''} aria-pressed={view === 'driver'} onClick={() => onView('driver')}>
+                  Find a garage
+                </button>
+                <button className={view === 'garage' ? 'on' : ''} aria-pressed={view === 'garage'} onClick={() => onView('garage')}>
+                  {user.hasGarage ? 'My garage' : 'List my garage'}
+                </button>
+              </div>
+              <span className="hello">Hi, {user.name.split(' ')[0]}</span>
               <button className="btn btn-ghost" onClick={onLogout}>
                 Log out
               </button>
@@ -214,7 +251,7 @@ function Header(props: {
   );
 }
 
-function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode, role?: Role) => void }) {
+function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode, intent?: Intent) => void }) {
   return (
     <section id="top" className="hero">
       <div className="wrap hero-grid">
@@ -616,7 +653,8 @@ function Process() {
   );
 }
 
-function ForGarages({ onAuth }: { onAuth: (m: AuthMode, role?: Role) => void }) {
+function ForGarages(props: { signedIn: boolean; onStart: () => void; onLogin: () => void }) {
+  const { signedIn, onStart, onLogin } = props;
   return (
     <section id="for-garages" className="section">
       <div className="wrap for-garages">
@@ -625,16 +663,19 @@ function ForGarages({ onAuth }: { onAuth: (m: AuthMode, role?: Role) => void }) 
           <h2>Get listed in minutes</h2>
           <p className="muted">
             Answer a few simple questions, tell us your services and prices (or point customers to your own website),
-            and your garage appears in the directory. No technical setup.
+            and your garage appears in the directory. No technical setup, and no second account: use the same login you
+            use to browse.
           </p>
         </div>
         <div className="cta-row">
-          <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup', 'garage')}>
+          <button className="btn btn-primary btn-lg" onClick={onStart}>
             List my garage
           </button>
-          <button className="btn btn-outline btn-lg" onClick={() => onAuth('login', 'garage')}>
-            Garage log in
-          </button>
+          {!signedIn && (
+            <button className="btn btn-outline btn-lg" onClick={onLogin}>
+              I already have an account
+            </button>
+          )}
         </div>
       </div>
     </section>
@@ -643,14 +684,13 @@ function ForGarages({ onAuth }: { onAuth: (m: AuthMode, role?: Role) => void }) 
 
 function AuthModal(props: {
   mode: AuthMode;
-  initialRole: Role;
+  intent: Intent;
   pendingName: string | null;
   onMode: (m: AuthMode) => void;
   onClose: () => void;
   onAuthed: (token: string, user: User) => void;
 }) {
-  const { mode, initialRole, pendingName, onMode, onClose, onAuthed } = props;
-  const [role, setRole] = useState<Role>(initialRole);
+  const { mode, intent, pendingName, onMode, onClose, onAuthed } = props;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -666,7 +706,7 @@ function AuthModal(props: {
   useEffect(() => setError(null), [mode]);
 
   const isSignup = mode === 'signup';
-  const isGarage = role === 'garage';
+  const isGarage = intent === 'garage';
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -674,14 +714,8 @@ function AuthModal(props: {
     setError(null);
     try {
       const res = isSignup
-        ? await api.signup(name.trim(), email.trim(), password, role)
+        ? await api.signup(name.trim(), email.trim(), password)
         : await api.login(email.trim(), password);
-      if (!isSignup && isGarage && res.user.role !== 'garage') {
-        // Signed in on the garage tab with a customer account: be explicit rather than silently switching screens.
-        setError('That is a customer account. Use the "Driver" tab to log in.');
-        await api.logout().catch(() => undefined);
-        return;
-      }
       onAuthed(res.token, res.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -703,19 +737,12 @@ function AuthModal(props: {
           &times;
         </button>
         <h2 id="auth-title">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
-        <div className="role-tabs" role="tablist" aria-label="Account type">
-          <button type="button" role="tab" aria-selected={!isGarage} className={!isGarage ? 'on' : ''} onClick={() => setRole('customer')}>
-            Driver
-          </button>
-          <button type="button" role="tab" aria-selected={isGarage} className={isGarage ? 'on' : ''} onClick={() => setRole('garage')}>
-            Garage owner
-          </button>
-        </div>
         <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
+        <p className="one-account">One account for everything: find garages as a driver and list your own garage.</p>
         <form onSubmit={submit} noValidate>
           {isSignup && (
             <label>
-              {isGarage ? 'Your name' : 'Full name'}
+              Full name
               <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required autoFocus />
             </label>
           )}
@@ -748,7 +775,7 @@ function AuthModal(props: {
             </div>
           )}
           <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
-            {busy ? 'Please wait...' : isSignup ? (isGarage ? 'Create garage account' : 'Create account') : 'Log in'}
+            {busy ? 'Please wait...' : isSignup ? 'Create account' : 'Log in'}
           </button>
         </form>
         <p className="switch">

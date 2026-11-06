@@ -91,6 +91,10 @@ final class GarageStore {
         return full(g, false);
     }
 
+    synchronized boolean hasGarage(String ownerEmail) {
+        return byOwner(ownerEmail) != null;
+    }
+
     /** The owner's own garage (including draft state), or null if they haven't set one up. */
     synchronized Map<String, Object> ownerView(String ownerEmail) {
         Garage g = byOwner(ownerEmail);

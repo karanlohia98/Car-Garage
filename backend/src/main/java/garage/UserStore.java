@@ -16,10 +16,8 @@ import javax.crypto.spec.PBEKeySpec;
 
 /** File-backed user store with PBKDF2 password hashing, plus in-memory session tokens. */
 final class UserStore {
-    static final String CUSTOMER = "customer";
-    static final String GARAGE = "garage";
-
-    record User(String email, String name, String salt, String hash, String role) {}
+    /** One account per email. A user can be a driver and, separately, own a garage profile (see GarageStore). */
+    record User(String email, String name, String salt, String hash) {}
 
     private record Session(String email, long expiresAt) {}
 
@@ -39,24 +37,23 @@ final class UserStore {
             for (String line : lines) {
                 String[] p = line.split("\t");
                 if (p.length >= 4) {
-                    // Older files have 4 columns (no role): treat those accounts as customers.
-                    String role = p.length >= 5 && GARAGE.equals(p[4]) ? GARAGE : CUSTOMER;
-                    users.put(p[0], new User(p[0], new String(Base64.getDecoder().decode(p[1]), StandardCharsets.UTF_8), p[2], p[3], role));
+                    // Files written by earlier versions may have a 5th "role" column; it is ignored now.
+                    users.put(p[0], new User(p[0], new String(Base64.getDecoder().decode(p[1]), StandardCharsets.UTF_8), p[2], p[3]));
                 }
             }
         }
     }
 
-    synchronized User register(String name, String email, String password, String role) throws IOException {
+    synchronized User register(String name, String email, String password) throws IOException {
         String key = email.toLowerCase();
         if (users.containsKey(key)) return null;
         byte[] saltBytes = new byte[16];
         random.nextBytes(saltBytes);
         String salt = Base64.getEncoder().encodeToString(saltBytes);
-        User u = new User(key, name, salt, hash(password, salt), role);
+        User u = new User(key, name, salt, hash(password, salt));
         users.put(key, u);
         String line = key + "\t" + Base64.getEncoder().encodeToString(name.getBytes(StandardCharsets.UTF_8))
-                + "\t" + salt + "\t" + u.hash() + "\t" + role + "\n";
+                + "\t" + salt + "\t" + u.hash() + "\n";
         Files.writeString(file, line, StandardCharsets.UTF_8,
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
         return u;

@@ -115,7 +115,13 @@ function validateStep(step: number, a: Answers): string | null {
   }
 }
 
-export default function GarageDashboard({ user, onSessionExpired }: { user: User; onSessionExpired: () => void }) {
+export default function GarageDashboard(props: {
+  user: User;
+  onSessionExpired: () => void;
+  /** Called after the garage is created, so the app can update the user's hasGarage flag. */
+  onGarageCreated: () => void;
+}) {
+  const { user, onSessionExpired, onGarageCreated } = props;
   const [garage, setGarage] = useState<OwnerGarage | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -153,10 +159,11 @@ export default function GarageDashboard({ user, onSessionExpired }: { user: User
     <section id="dashboard" className="section">
       <div className="wrap">
         <div className="section-head">
-          <p className="eyebrow">Garage dashboard</p>
-          <h2>Welcome, {user.name.split(' ')[0]}</h2>
+          <p className="eyebrow">My garage</p>
+          <h2>{garage ? 'Your garage' : `Hi ${user.name.split(' ')[0]}, let's list your garage`}</h2>
           <p className="muted">
-            Answer a few quick questions and your garage appears in the directory. You can change your answers any time.
+            Answer a few quick questions and your garage appears in the directory. You can change your answers any time,
+            and switch back to <b>Find a garage</b> above whenever you want to browse as a driver.
           </p>
         </div>
 
@@ -177,6 +184,7 @@ export default function GarageDashboard({ user, onSessionExpired }: { user: User
             isNew={garage === null}
             wasPublished={garage?.published ?? false}
             onSaved={(g) => {
+              if (!garage) onGarageCreated();
               setGarage(g);
               setEditing(false);
             }}

@@ -19,12 +19,12 @@ import java.util.regex.Pattern;
  *   POST /api/login        {email,password}       -> {token,user}
  *   GET  /api/me           (Bearer token)         -> {user}
  *   POST /api/logout       (Bearer token)         -> {ok}
- *   (signup also takes role: "customer" (default) or "garage")
- *   GET  /api/catalog                             -> {services:[...]}  public: standard service list
+ *   One account per email: every account is a driver, and any account may also set up a garage profile.
+ *   GET  /api/catalog                            -> {services:[...]}  public: standard service list
  *   GET  /api/garages                             -> {garages:[...]}   public: published garages + service names, no prices
  *   GET  /api/garages/{id} (Bearer token)         -> {garage:{...}}    login required: services with prices
- *   GET  /api/my/garage    (Bearer, garage role)  -> {garage:{...}|null}  the owner's own garage
- *   PUT  /api/my/garage    (Bearer, garage role)  -> {garage:{...}}    create/update the owner's garage
+ *   GET  /api/my/garage    (Bearer token)         -> {garage:{...}|null}  the signed-in user's own garage profile
+ *   PUT  /api/my/garage    (Bearer token)         -> {garage:{...}}    create/update that garage profile
  *
  * Also serves the built React app from ../frontend/dist on the same port.
  */
@@ -40,11 +40,13 @@ public final class Main {
         boolean seedSamples = !"false".equalsIgnoreCase(System.getenv("SEED_SAMPLES"));
         GarageStore garageStore = new GarageStore(garagesFile, seedSamples);
 
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        // Local by default. Set HOST=0.0.0.0 when running in a container or on a server behind a proxy.
+        String host = System.getenv().getOrDefault("HOST", "127.0.0.1");
+        HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
         server.setExecutor(Executors.newFixedThreadPool(8));
-        server.createContext("/api/signup", ex -> handle(ex, () -> signup(ex, store)));
-        server.createContext("/api/login", ex -> handle(ex, () -> login(ex, store)));
-        server.createContext("/api/me", ex -> handle(ex, () -> me(ex, store)));
+        server.createContext("/api/signup", ex -> handle(ex, () -> signup(ex, store, garageStore)));
+        server.createContext("/api/login", ex -> handle(ex, () -> login(ex, store, garageStore)));
+        server.createContext("/api/me", ex -> handle(ex, () -> me(ex, store, garageStore)));
         server.createContext("/api/logout", ex -> handle(ex, () -> logout(ex, store)));
         server.createContext("/api/catalog", ex -> handle(ex, () -> catalog(ex)));
         server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store, garageStore)));
@@ -71,7 +73,7 @@ public final class Main {
         }
     }
 
-    private static void signup(HttpExchange ex, UserStore store) throws Exception {
+    private static void signup(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         if (!method(ex, "POST")) return;
         Map<String, String> b = Json.parseFlatObject(body(ex));
         String name = b.getOrDefault("name", "").trim();
@@ -80,26 +82,24 @@ public final class Main {
         if (name.isEmpty() || name.length() > 80) { error(ex, 400, "Please enter your name."); return; }
         if (!EMAIL.matcher(email).matches() || email.length() > 120) { error(ex, 400, "Please enter a valid email."); return; }
         if (password.length() < 8 || password.length() > 128) { error(ex, 400, "Password must be at least 8 characters."); return; }
-        String roleRaw = b.getOrDefault("role", UserStore.CUSTOMER);
-        if (!roleRaw.equals(UserStore.CUSTOMER) && !roleRaw.equals(UserStore.GARAGE)) { error(ex, 400, "Invalid account type."); return; }
-        UserStore.User u = store.register(name, email, password, roleRaw);
+        UserStore.User u = store.register(name, email, password);
         if (u == null) { error(ex, 409, "An account with that email already exists."); return; }
-        send(ex, 201, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u))));
+        send(ex, 201, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u, garageStore))));
     }
 
-    private static void login(HttpExchange ex, UserStore store) throws Exception {
+    private static void login(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         if (!method(ex, "POST")) return;
         Map<String, String> b = Json.parseFlatObject(body(ex));
         UserStore.User u = store.authenticate(b.getOrDefault("email", "").trim(), b.getOrDefault("password", ""));
         if (u == null) { error(ex, 401, "Incorrect email or password."); return; }
-        send(ex, 200, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u))));
+        send(ex, 200, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u, garageStore))));
     }
 
-    private static void me(HttpExchange ex, UserStore store) throws Exception {
+    private static void me(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         if (!method(ex, "GET")) return;
         UserStore.User u = store.userForToken(bearer(ex));
         if (u == null) { error(ex, 401, "Please sign in."); return; }
-        send(ex, 200, Json.write(Json.obj("user", userJson(u))));
+        send(ex, 200, Json.write(Json.obj("user", userJson(u, garageStore))));
     }
 
     private static void logout(HttpExchange ex, UserStore store) throws Exception {
@@ -128,11 +128,10 @@ public final class Main {
         send(ex, 200, Json.write(Json.obj("garage", g)));
     }
 
-    /** The signed-in garage owner's own listing. Customers get 403. */
+    /** The signed-in user's own garage profile. Any account may have one; each can only touch its own. */
     private static void myGarage(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         UserStore.User u = store.userForToken(bearer(ex));
         if (u == null) { error(ex, 401, "Please sign in."); return; }
-        if (!UserStore.GARAGE.equals(u.role())) { error(ex, 403, "Only garage accounts can manage a garage."); return; }
         String m = ex.getRequestMethod();
         if (m.equals("GET")) {
             send(ex, 200, Json.write(Json.obj("garage", garageStore.ownerView(u.email()))));
@@ -177,8 +176,8 @@ public final class Main {
         return "application/octet-stream";
     }
 
-    private static Map<String, Object> userJson(UserStore.User u) {
-        return Json.obj("name", u.name(), "email", u.email(), "role", u.role());
+    private static Map<String, Object> userJson(UserStore.User u, GarageStore garageStore) {
+        return Json.obj("name", u.name(), "email", u.email(), "hasGarage", garageStore.hasGarage(u.email()));
     }
 
     private static boolean method(HttpExchange ex, String m) throws IOException {

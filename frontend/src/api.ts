@@ -1,10 +1,10 @@
-export type Role = 'customer' | 'garage';
 export type PricingMode = 'listing' | 'website';
 
+/** One account per email. Every user is a driver; hasGarage says whether they also own a garage profile. */
 export interface User {
   name: string;
   email: string;
-  role: Role;
+  hasGarage: boolean;
 }
 
 /** Public summary: which services a garage offers, no prices. */
@@ -129,8 +129,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-export const signup = (name: string, email: string, password: string, role: Role = 'customer') =>
-  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password, role }) });
+export const signup = (name: string, email: string, password: string) =>
+  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) });
 
 export const login = (email: string, password: string) =>
   request<AuthResponse>('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });

@@ -170,12 +170,12 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 .detail-meta li { display: flex; align-items: center; gap: 10px; }
 .detail-meta li > svg { color: var(--accent); flex: none; }
 
-/* Roles */
-.role-pill { display: inline-block; margin-right: 8px; background: rgba(255, 106, 26, .16); color: var(--accent-2); border-radius: 999px; padding: 2px 9px; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.role-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 4px; margin-top: 16px; }
-.role-tabs button { background: none; border: 0; color: var(--muted); border-radius: 9px; padding: 9px; font-weight: 700; }
-.role-tabs button.on { background: var(--accent); color: #1a0c02; }
-.modal .role-tabs + .muted { margin-top: 14px; }
+/* One account, two views */
+.view-switch { display: inline-flex; gap: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 3px; }
+.view-switch button { background: none; border: 0; color: var(--muted); border-radius: 9px; padding: 7px 13px; font-weight: 700; font-size: .88rem; white-space: nowrap; }
+.view-switch button:hover { color: var(--text); }
+.view-switch button.on { background: var(--accent); color: #1a0c02; }
+.one-account { color: var(--muted); font-size: .82rem; margin: -8px 0 18px; }
 .for-garages { display: flex; justify-content: space-between; align-items: center; gap: 32px; flex-wrap: wrap; background: var(--bg-3); border: 1px solid var(--line); border-radius: 18px; padding: 40px; }
 .for-garages h2 { font-size: clamp(1.8rem, 3.5vw, 2.5rem); text-transform: uppercase; font-weight: 800; }
 .for-garages .muted { margin-top: 10px; max-width: 520px; }
@@ -249,6 +249,10 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 @media (max-width: 560px) {
   .trust-grid, .steps { grid-template-columns: 1fr; }
   .hello { display: none; }
+  .view-switch button { padding: 7px 9px; font-size: .8rem; }
+  .auth-actions { gap: 6px; }
+  .header-inner { gap: 10px; }
+  .brand span { display: none; }
   .btn-lg { width: 100%; text-align: center; }
   .section { padding: 60px 0; }
   .garage-grid { grid-template-columns: 1fr; }
