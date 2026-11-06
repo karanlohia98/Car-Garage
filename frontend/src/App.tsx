@@ -1,49 +1,27 @@
-import { FormEvent, ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FaBolt,
-  FaCarBattery,
-  FaCarSide,
-  FaClipboardCheck,
   FaClock,
-  FaCogs,
+  FaExternalLinkAlt,
   FaLock,
   FaMapMarkerAlt,
-  FaOilCan,
   FaPhoneAlt,
-  FaRegCircle,
   FaSearch,
   FaShieldAlt,
-  FaSnowflake,
   FaStar,
-  FaTachometerAlt,
-  FaTools,
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { GarageDetail, GarageSummary, User } from './api';
+import type { GarageDetail, GarageSummary, Role, User } from './api';
+import GarageDashboard from './GarageDashboard';
+import { Stars, formatPlace, fullAddress, iconFor, isHttpUrl, scrollToId } from './shared';
 
 type AuthMode = 'login' | 'signup';
-
-const ICONS: Record<string, ReactElement> = {
-  oil: <FaOilCan />,
-  brakes: <FaCogs />,
-  tires: <FaRegCircle />,
-  battery: <FaCarBattery />,
-  ac: <FaSnowflake />,
-  engine: <FaTachometerAlt />,
-  align: <FaCarSide />,
-  inspection: <FaClipboardCheck />,
-  ev: <FaBolt />,
-  full: <FaTools />,
-};
-
-const scrollToId = (id: string) =>
-  setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 80);
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState<boolean>(!!api.getToken());
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [authRole, setAuthRole] = useState<Role>('customer');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Garage the visitor clicked before signing in; opened right after they authenticate.
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -71,11 +49,20 @@ export default function App() {
       .finally(() => setChecking(false));
   }, []);
 
+  const openAuth = (mode: AuthMode, role: Role = 'customer') => {
+    setAuthRole(role);
+    setAuthMode(mode);
+  };
+
   const handleAuthed = (token: string, u: User) => {
     api.setToken(token);
     setUser(u);
     setAuthMode(null);
-    if (pendingId) {
+    loadGarages(); // pick up any change (e.g. a garage just published)
+    if (u.role === 'garage') {
+      setPendingId(null);
+      scrollToId('dashboard');
+    } else if (pendingId) {
       setSelectedId(pendingId);
       setPendingId(null);
       scrollToId('garage-detail');
@@ -98,7 +85,7 @@ export default function App() {
   const handleSelect = (id: string) => {
     if (!user) {
       setPendingId(id);
-      setAuthMode('signup');
+      openAuth('signup');
       return;
     }
     setSelectedId(id);
@@ -110,46 +97,55 @@ export default function App() {
     setPendingId(null);
   };
 
+  const isGarage = user?.role === 'garage';
   const selected = garages?.find((g) => g.id === selectedId) ?? null;
   const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
   return (
     <>
-      <Header user={user} checking={checking} onAuth={setAuthMode} onLogout={handleLogout} />
+      <Header user={user} checking={checking} onAuth={openAuth} onLogout={handleLogout} />
       <main>
-        <Hero user={user} onAuth={setAuthMode} />
-        <TrustStrip />
-        <GaragesSection
-          garages={garages}
-          error={garagesError}
-          onRetry={loadGarages}
-          user={user}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-        />
-        {user && selectedId && (
-          <GarageDetailSection
-            key={selectedId}
-            id={selectedId}
-            summary={selected}
-            onSessionExpired={handleLogout}
-            onBack={() => {
-              setSelectedId(null);
-              scrollToId('garages');
-            }}
-          />
+        {isGarage && user ? (
+          <GarageDashboard user={user} onSessionExpired={handleLogout} />
+        ) : (
+          <>
+            <Hero user={user} onAuth={openAuth} />
+            <TrustStrip />
+            <GaragesSection
+              garages={garages}
+              error={garagesError}
+              onRetry={loadGarages}
+              user={user}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+            />
+            {user && selectedId && (
+              <GarageDetailSection
+                key={selectedId}
+                id={selectedId}
+                summary={selected}
+                onSessionExpired={handleLogout}
+                onBack={() => {
+                  setSelectedId(null);
+                  scrollToId('garages');
+                }}
+              />
+            )}
+            <Process />
+            {!user && <ForGarages onAuth={openAuth} />}
+          </>
         )}
-        <Process />
       </main>
       <footer className="footer">
         <div className="wrap">
           <span>&copy; {new Date().getFullYear()} Garage Hub. All rights reserved.</span>
-          <span>Demo site: garages, contact details and prices are sample data.</span>
+          <span>Demo site: sample garages, contact details and prices.</span>
         </div>
       </footer>
       {authMode && (
         <AuthModal
           mode={authMode}
+          initialRole={authRole}
           pendingName={pending?.name ?? null}
           onMode={setAuthMode}
           onClose={closeAuth}
@@ -163,10 +159,11 @@ export default function App() {
 function Header(props: {
   user: User | null;
   checking: boolean;
-  onAuth: (m: AuthMode) => void;
+  onAuth: (m: AuthMode, role?: Role) => void;
   onLogout: () => void;
 }) {
   const { user, checking, onAuth, onLogout } = props;
+  const isGarage = user?.role === 'garage';
   return (
     <header className="header">
       <div className="wrap header-inner">
@@ -180,13 +177,23 @@ function Header(props: {
           </span>
         </a>
         <nav className="nav" aria-label="Main">
-          <a href="#garages">Garages</a>
-          <a href="#process">How it works</a>
+          {isGarage ? (
+            <a href="#dashboard">My garage</a>
+          ) : (
+            <>
+              <a href="#garages">Garages</a>
+              <a href="#process">How it works</a>
+              {!user && <a href="#for-garages">For garages</a>}
+            </>
+          )}
         </nav>
         <div className="auth-actions">
           {checking ? null : user ? (
             <>
-              <span className="hello">Hi, {user.name.split(' ')[0]}</span>
+              <span className="hello">
+                {isGarage && <span className="role-pill">Garage</span>}
+                Hi, {user.name.split(' ')[0]}
+              </span>
               <button className="btn btn-ghost" onClick={onLogout}>
                 Log out
               </button>
@@ -207,7 +214,7 @@ function Header(props: {
   );
 }
 
-function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode) => void }) {
+function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode, role?: Role) => void }) {
   return (
     <section id="top" className="hero">
       <div className="wrap hero-grid">
@@ -322,14 +329,6 @@ function TrustStrip() {
   );
 }
 
-function Stars({ rating, reviews }: { rating: number; reviews: number }) {
-  return (
-    <span className="rating" aria-label={`Rated ${rating} out of 5 from ${reviews} reviews`}>
-      <FaStar /> <b>{rating.toFixed(1)}</b> <small>({reviews})</small>
-    </span>
-  );
-}
-
 function GaragesSection(props: {
   garages: GarageSummary[] | null;
   error: string | null;
@@ -342,10 +341,14 @@ function GaragesSection(props: {
   const [query, setQuery] = useState('');
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
 
-  // Every service offered by at least one garage, for the filter chips.
+  // Every service offered by at least one garage, for the filter chips (catalog services only).
   const serviceOptions = useMemo(() => {
     const map = new Map<string, string>();
-    garages?.forEach((g) => g.serviceIds.forEach((id, i) => map.set(id, g.serviceNames[i])));
+    garages?.forEach((g) =>
+      g.serviceIds.forEach((id, i) => {
+        if (!id.startsWith('custom')) map.set(id, g.serviceNames[i]);
+      }),
+    );
     return Array.from(map, ([id, name]) => ({ id, name }));
   }, [garages]);
 
@@ -354,7 +357,7 @@ function GaragesSection(props: {
     return (garages ?? []).filter(
       (g) =>
         (!serviceFilter || g.serviceIds.includes(serviceFilter)) &&
-        (!q || g.name.toLowerCase().includes(q) || g.area.toLowerCase().includes(q)),
+        (!q || g.name.toLowerCase().includes(q) || g.area.toLowerCase().includes(q) || g.city.toLowerCase().includes(q)),
     );
   }, [garages, query, serviceFilter]);
 
@@ -375,7 +378,7 @@ function GaragesSection(props: {
             <FaSearch aria-hidden="true" />
             <input
               type="search"
-              placeholder="Search by garage or neighbourhood"
+              placeholder="Search by garage, neighbourhood or city"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Search garages"
@@ -425,24 +428,25 @@ function GaragesSection(props: {
                   <div>
                     <h3>{g.name}</h3>
                     <p className="area">
-                      <FaMapMarkerAlt /> {g.area}, Seattle
+                      <FaMapMarkerAlt /> {formatPlace(g)}
                     </p>
                   </div>
                   <Stars rating={g.rating} reviews={g.reviews} />
                 </div>
-                <p className="tagline">{g.tagline}</p>
+                {g.tagline && <p className="tagline">{g.tagline}</p>}
                 <p className="open-hours">
                   <FaClock /> {g.hours}
                 </p>
                 <ul className="tags" aria-label="Services offered">
                   {g.serviceIds.map((id, i) => (
                     <li key={id} className={id === serviceFilter ? 'match' : ''}>
-                      {ICONS[id] ?? <FaWrench />} {g.serviceNames[i]}
+                      {iconFor(id)} {g.serviceNames[i]}
                     </li>
                   ))}
                 </ul>
                 <button className="btn btn-primary btn-block" onClick={() => onSelect(g.id)}>
-                  {!user && <FaLock />} {g.id === selectedId ? 'Viewing services & pricing' : 'View services & pricing'}
+                  {!user && <FaLock />}{' '}
+                  {g.id === selectedId ? 'Viewing services & pricing' : g.mode === 'website' ? 'View services' : 'View services & pricing'}
                 </button>
               </article>
             ))}
@@ -477,6 +481,8 @@ function GarageDetailSection(props: {
   useEffect(load, [load]);
 
   const name = garage?.name ?? summary?.name ?? 'Garage';
+  const tel = garage ? `tel:${garage.phone.replace(/[^\d+]/g, '')}` : '';
+  const toWebsite = garage?.mode === 'website' && isHttpUrl(garage.website);
   return (
     <section id="garage-detail" className="section alt">
       <div className="wrap">
@@ -485,7 +491,7 @@ function GarageDetailSection(props: {
         </button>
         <div className="detail-head">
           <div>
-            <p className="eyebrow">Services &amp; pricing</p>
+            <p className="eyebrow">{toWebsite ? 'Services' : 'Services & pricing'}</p>
             <h2>{name}</h2>
             <p className="muted">{garage?.tagline ?? summary?.tagline}</p>
           </div>
@@ -495,13 +501,13 @@ function GarageDetailSection(props: {
                 <Stars rating={garage.rating} reviews={garage.reviews} />
               </li>
               <li>
-                <FaMapMarkerAlt /> {garage.address}
+                <FaMapMarkerAlt /> {fullAddress(garage)}
               </li>
               <li>
                 <FaClock /> {garage.hours}
               </li>
               <li>
-                <FaPhoneAlt /> <a href={`tel:${garage.phone.replace(/[^\d+]/g, '')}`}>{garage.phone}</a>
+                <FaPhoneAlt /> <a href={tel}>{garage.phone}</a>
               </li>
             </ul>
           )}
@@ -524,22 +530,46 @@ function GarageDetailSection(props: {
           </div>
         )}
 
-        {garage && (
+        {garage && toWebsite && (
+          <>
+            <div className="website-cta">
+              <div>
+                <h3>{name} publishes its own prices</h3>
+                <p className="muted">Open their website for up-to-date pricing and booking.</p>
+              </div>
+              <a className="btn btn-primary btn-lg" href={garage.website} target="_blank" rel="noopener noreferrer">
+                Visit their website <FaExternalLinkAlt />
+              </a>
+            </div>
+            <ul className="tags big" aria-label="Services offered">
+              {garage.services.map((s) => (
+                <li key={s.id}>
+                  {iconFor(s.id)} {s.name}
+                  {s.duration && <small> &middot; {s.duration}</small>}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {garage && !toWebsite && (
           <>
             <div className="cards">
               {garage.services.map((s) => (
                 <article className="card" key={s.id}>
                   {s.badge && <span className="badge">{s.badge}</span>}
-                  <span className="card-icon">{ICONS[s.id] ?? <FaWrench />}</span>
+                  <span className="card-icon">{iconFor(s.id)}</span>
                   <h3>{s.name}</h3>
                   <p>{s.description}</p>
                   <div className="card-foot">
                     <div className="price">
                       <small>from</small> ${s.price}
                     </div>
-                    <div className="duration">
-                      <FaClock /> {s.duration}
-                    </div>
+                    {s.duration && (
+                      <div className="duration">
+                        <FaClock /> {s.duration}
+                      </div>
+                    )}
                   </div>
                 </article>
               ))}
@@ -547,9 +577,8 @@ function GarageDetailSection(props: {
             <p className="booking-note">
               <FaPhoneAlt />
               <span>
-                Ready to book? Call {garage.name} on{' '}
-                <a href={`tel:${garage.phone.replace(/[^\d+]/g, '')}`}>{garage.phone}</a> or drop in during opening
-                hours. Prices are starting prices for a standard passenger vehicle.
+                Ready to book? Call {garage.name} on <a href={tel}>{garage.phone}</a> or drop in during opening hours.
+                Prices are starting prices for a standard passenger vehicle.
               </span>
             </p>
           </>
@@ -563,11 +592,11 @@ function Process() {
   const steps = [
     { n: '1', t: 'Create your account', d: 'Sign up free to unlock garage pricing.' },
     { n: '2', t: 'Choose a garage', d: 'Search by name or area, or filter by the service you need.' },
-    { n: '3', t: 'Compare services & prices', d: "See exactly what that garage offers and what it costs." },
+    { n: '3', t: 'Compare services & prices', d: 'See exactly what that garage offers and what it costs.' },
     { n: '4', t: 'Call or drop in', d: 'Book directly with the garage using the details on its page.' },
   ];
   return (
-    <section id="process" className="section">
+    <section id="process" className="section alt">
       <div className="wrap">
         <div className="section-head">
           <p className="eyebrow">How it works</p>
@@ -587,14 +616,41 @@ function Process() {
   );
 }
 
+function ForGarages({ onAuth }: { onAuth: (m: AuthMode, role?: Role) => void }) {
+  return (
+    <section id="for-garages" className="section">
+      <div className="wrap for-garages">
+        <div>
+          <p className="eyebrow">Own a garage?</p>
+          <h2>Get listed in minutes</h2>
+          <p className="muted">
+            Answer a few simple questions, tell us your services and prices (or point customers to your own website),
+            and your garage appears in the directory. No technical setup.
+          </p>
+        </div>
+        <div className="cta-row">
+          <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup', 'garage')}>
+            List my garage
+          </button>
+          <button className="btn btn-outline btn-lg" onClick={() => onAuth('login', 'garage')}>
+            Garage log in
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AuthModal(props: {
   mode: AuthMode;
+  initialRole: Role;
   pendingName: string | null;
   onMode: (m: AuthMode) => void;
   onClose: () => void;
   onAuthed: (token: string, user: User) => void;
 }) {
-  const { mode, pendingName, onMode, onClose, onAuthed } = props;
+  const { mode, initialRole, pendingName, onMode, onClose, onAuthed } = props;
+  const [role, setRole] = useState<Role>(initialRole);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -609,13 +665,23 @@ function AuthModal(props: {
 
   useEffect(() => setError(null), [mode]);
 
+  const isSignup = mode === 'signup';
+  const isGarage = role === 'garage';
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res =
-        mode === 'signup' ? await api.signup(name.trim(), email.trim(), password) : await api.login(email.trim(), password);
+      const res = isSignup
+        ? await api.signup(name.trim(), email.trim(), password, role)
+        : await api.login(email.trim(), password);
+      if (!isSignup && isGarage && res.user.role !== 'garage') {
+        // Signed in on the garage tab with a customer account: be explicit rather than silently switching screens.
+        setError('That is a customer account. Use the "Driver" tab to log in.');
+        await api.logout().catch(() => undefined);
+        return;
+      }
       onAuthed(res.token, res.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -624,8 +690,12 @@ function AuthModal(props: {
     }
   };
 
-  const isSignup = mode === 'signup';
-  const reason = pendingName ? `to see ${pendingName}'s services and pricing` : 'to see garage services and pricing';
+  const reason = isGarage
+    ? 'to list your garage'
+    : pendingName
+      ? `to see ${pendingName}'s services and pricing`
+      : 'to see garage services and pricing';
+
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -633,11 +703,19 @@ function AuthModal(props: {
           &times;
         </button>
         <h2 id="auth-title">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
+        <div className="role-tabs" role="tablist" aria-label="Account type">
+          <button type="button" role="tab" aria-selected={!isGarage} className={!isGarage ? 'on' : ''} onClick={() => setRole('customer')}>
+            Driver
+          </button>
+          <button type="button" role="tab" aria-selected={isGarage} className={isGarage ? 'on' : ''} onClick={() => setRole('garage')}>
+            Garage owner
+          </button>
+        </div>
         <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
         <form onSubmit={submit} noValidate>
           {isSignup && (
             <label>
-              Full name
+              {isGarage ? 'Your name' : 'Full name'}
               <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required autoFocus />
             </label>
           )}
@@ -670,7 +748,7 @@ function AuthModal(props: {
             </div>
           )}
           <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
-            {busy ? 'Please wait...' : isSignup ? 'Create account' : 'Log in'}
+            {busy ? 'Please wait...' : isSignup ? (isGarage ? 'Create garage account' : 'Create account') : 'Log in'}
           </button>
         </form>
         <p className="switch">

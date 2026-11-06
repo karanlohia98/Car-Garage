@@ -5,40 +5,105 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Tiny JSON helper: parses flat objects of string values, writes maps/lists/strings/numbers. */
+/**
+ * Small JSON reader/writer.
+ * parse() returns Map&lt;String,Object&gt;, List&lt;Object&gt;, String, Double, Boolean or null.
+ */
 final class Json {
     private Json() {}
 
+    private static final int MAX_DEPTH = 32;
+
+    // ---------- parsing ----------
+
+    static Object parse(String s) {
+        int[] i = {0};
+        Object v = value(s, i, 0);
+        skipWs(s, i);
+        if (i[0] != s.length()) throw new IllegalArgumentException("Invalid JSON");
+        return v;
+    }
+
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> parseObject(String s) {
+        Object v = parse(s);
+        if (!(v instanceof Map)) throw new IllegalArgumentException("Expected JSON object");
+        return (Map<String, Object>) v;
+    }
+
+    /** Parses an object and returns its string-like values as strings (non-scalars are ignored). */
     static Map<String, String> parseFlatObject(String s) {
         Map<String, String> out = new LinkedHashMap<>();
-        int[] i = {0};
+        for (Map.Entry<String, Object> e : parseObject(s).entrySet()) {
+            Object v = e.getValue();
+            if (v instanceof String || v instanceof Number || v instanceof Boolean) out.put(e.getKey(), String.valueOf(v));
+        }
+        return out;
+    }
+
+    private static Object value(String s, int[] i, int depth) {
+        if (depth > MAX_DEPTH) throw new IllegalArgumentException("Invalid JSON");
         skipWs(s, i);
+        char c = peek(s, i);
+        switch (c) {
+            case '{': return object(s, i, depth);
+            case '[': return array(s, i, depth);
+            case '"': return readString(s, i);
+            case 't': literal(s, i, "true"); return Boolean.TRUE;
+            case 'f': literal(s, i, "false"); return Boolean.FALSE;
+            case 'n': literal(s, i, "null"); return null;
+            default: return number(s, i);
+        }
+    }
+
+    private static Map<String, Object> object(String s, int[] i, int depth) {
+        Map<String, Object> out = new LinkedHashMap<>();
         expect(s, i, '{');
         skipWs(s, i);
-        if (peek(s, i) == '}') return out;
+        if (peek(s, i) == '}') { i[0]++; return out; }
         while (true) {
             skipWs(s, i);
             String key = readString(s, i);
             skipWs(s, i);
             expect(s, i, ':');
-            skipWs(s, i);
-            char c = peek(s, i);
-            String value;
-            if (c == '"') {
-                value = readString(s, i);
-            } else {
-                int start = i[0];
-                while (i[0] < s.length() && ",}".indexOf(s.charAt(i[0])) < 0) i[0]++;
-                value = s.substring(start, i[0]).trim();
-            }
-            out.put(key, value);
+            out.put(key, value(s, i, depth + 1));
             skipWs(s, i);
             char n = peek(s, i);
             i[0]++;
-            if (n == '}') break;
+            if (n == '}') return out;
             if (n != ',') throw new IllegalArgumentException("Invalid JSON");
         }
-        return out;
+    }
+
+    private static List<Object> array(String s, int[] i, int depth) {
+        List<Object> out = new ArrayList<>();
+        expect(s, i, '[');
+        skipWs(s, i);
+        if (peek(s, i) == ']') { i[0]++; return out; }
+        while (true) {
+            out.add(value(s, i, depth + 1));
+            skipWs(s, i);
+            char n = peek(s, i);
+            i[0]++;
+            if (n == ']') return out;
+            if (n != ',') throw new IllegalArgumentException("Invalid JSON");
+        }
+    }
+
+    private static Double number(String s, int[] i) {
+        int start = i[0];
+        while (i[0] < s.length() && "+-0123456789.eE".indexOf(s.charAt(i[0])) >= 0) i[0]++;
+        if (start == i[0]) throw new IllegalArgumentException("Invalid JSON");
+        try {
+            return Double.parseDouble(s.substring(start, i[0]));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid JSON");
+        }
+    }
+
+    private static void literal(String s, int[] i, String word) {
+        if (!s.startsWith(word, i[0])) throw new IllegalArgumentException("Invalid JSON");
+        i[0] += word.length();
     }
 
     private static char peek(String s, int[] i) {
@@ -73,7 +138,11 @@ final class Json {
                     case 'f' -> sb.append('\f');
                     case 'u' -> {
                         if (i[0] + 4 > s.length()) throw new IllegalArgumentException("Invalid JSON");
-                        sb.append((char) Integer.parseInt(s.substring(i[0], i[0] + 4), 16));
+                        try {
+                            sb.append((char) Integer.parseInt(s.substring(i[0], i[0] + 4), 16));
+                        } catch (NumberFormatException ex) {
+                            throw new IllegalArgumentException("Invalid JSON");
+                        }
                         i[0] += 4;
                     }
                     default -> sb.append(e);
@@ -84,6 +153,8 @@ final class Json {
         }
         return sb.toString();
     }
+
+    // ---------- writing ----------
 
     static String write(Object o) {
         StringBuilder sb = new StringBuilder();

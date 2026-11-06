@@ -16,7 +16,10 @@ import javax.crypto.spec.PBEKeySpec;
 
 /** File-backed user store with PBKDF2 password hashing, plus in-memory session tokens. */
 final class UserStore {
-    record User(String email, String name, String salt, String hash) {}
+    static final String CUSTOMER = "customer";
+    static final String GARAGE = "garage";
+
+    record User(String email, String name, String salt, String hash, String role) {}
 
     private record Session(String email, long expiresAt) {}
 
@@ -35,23 +38,25 @@ final class UserStore {
             List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
             for (String line : lines) {
                 String[] p = line.split("\t");
-                if (p.length == 4) {
-                    users.put(p[0], new User(p[0], new String(Base64.getDecoder().decode(p[1]), StandardCharsets.UTF_8), p[2], p[3]));
+                if (p.length >= 4) {
+                    // Older files have 4 columns (no role): treat those accounts as customers.
+                    String role = p.length >= 5 && GARAGE.equals(p[4]) ? GARAGE : CUSTOMER;
+                    users.put(p[0], new User(p[0], new String(Base64.getDecoder().decode(p[1]), StandardCharsets.UTF_8), p[2], p[3], role));
                 }
             }
         }
     }
 
-    synchronized User register(String name, String email, String password) throws IOException {
+    synchronized User register(String name, String email, String password, String role) throws IOException {
         String key = email.toLowerCase();
         if (users.containsKey(key)) return null;
         byte[] saltBytes = new byte[16];
         random.nextBytes(saltBytes);
         String salt = Base64.getEncoder().encodeToString(saltBytes);
-        User u = new User(key, name, salt, hash(password, salt));
+        User u = new User(key, name, salt, hash(password, salt), role);
         users.put(key, u);
         String line = key + "\t" + Base64.getEncoder().encodeToString(name.getBytes(StandardCharsets.UTF_8))
-                + "\t" + salt + "\t" + u.hash() + "\n";
+                + "\t" + salt + "\t" + u.hash() + "\t" + role + "\n";
         Files.writeString(file, line, StandardCharsets.UTF_8,
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
         return u;

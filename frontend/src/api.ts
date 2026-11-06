@@ -1,17 +1,23 @@
+export type Role = 'customer' | 'garage';
+export type PricingMode = 'listing' | 'website';
+
 export interface User {
   name: string;
   email: string;
+  role: Role;
 }
 
 /** Public summary: which services a garage offers, no prices. */
 export interface GarageSummary {
   id: string;
   name: string;
+  city: string;
   area: string;
   rating: number;
   reviews: number;
   hours: string;
   tagline: string;
+  mode: PricingMode;
   serviceIds: string[];
   serviceNames: string[];
 }
@@ -29,6 +35,7 @@ export interface Service {
 export interface GarageDetail {
   id: string;
   name: string;
+  city: string;
   area: string;
   address: string;
   phone: string;
@@ -36,7 +43,42 @@ export interface GarageDetail {
   reviews: number;
   hours: string;
   tagline: string;
+  mode: PricingMode;
+  website: string;
   services: Service[];
+}
+
+/** A garage as seen by its owner (includes draft state). */
+export interface OwnerGarage extends GarageDetail {
+  published: boolean;
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface ServiceInput {
+  id: string;
+  name?: string;
+  description?: string;
+  price?: number;
+  duration?: string;
+}
+
+export interface GarageInput {
+  name: string;
+  city: string;
+  area: string;
+  address: string;
+  phone: string;
+  hours: string;
+  tagline: string;
+  mode: PricingMode;
+  website: string;
+  published: boolean;
+  services: ServiceInput[];
 }
 
 interface AuthResponse {
@@ -87,8 +129,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-export const signup = (name: string, email: string, password: string) =>
-  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+export const signup = (name: string, email: string, password: string, role: Role = 'customer') =>
+  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password, role }) });
 
 export const login = (email: string, password: string) =>
   request<AuthResponse>('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
@@ -97,7 +139,14 @@ export const me = () => request<{ user: User }>('/api/me');
 
 export const logout = () => request<{ ok: boolean }>('/api/logout', { method: 'POST' });
 
+export const fetchCatalog = () => request<{ services: CatalogItem[] }>('/api/catalog');
+
 export const fetchGarages = () => request<{ garages: GarageSummary[] }>('/api/garages');
 
 export const fetchGarage = (id: string) =>
   request<{ garage: GarageDetail }>(`/api/garages/${encodeURIComponent(id)}`);
+
+export const fetchMyGarage = () => request<{ garage: OwnerGarage | null }>('/api/my/garage');
+
+export const saveMyGarage = (input: GarageInput) =>
+  request<{ garage: OwnerGarage }>('/api/my/garage', { method: 'PUT', body: JSON.stringify(input) });

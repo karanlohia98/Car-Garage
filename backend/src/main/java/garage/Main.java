@@ -19,8 +19,12 @@ import java.util.regex.Pattern;
  *   POST /api/login        {email,password}       -> {token,user}
  *   GET  /api/me           (Bearer token)         -> {user}
  *   POST /api/logout       (Bearer token)         -> {ok}
- *   GET  /api/garages                             -> {garages:[...]}   public: garages + service names, no prices
+ *   (signup also takes role: "customer" (default) or "garage")
+ *   GET  /api/catalog                             -> {services:[...]}  public: standard service list
+ *   GET  /api/garages                             -> {garages:[...]}   public: published garages + service names, no prices
  *   GET  /api/garages/{id} (Bearer token)         -> {garage:{...}}    login required: services with prices
+ *   GET  /api/my/garage    (Bearer, garage role)  -> {garage:{...}|null}  the owner's own garage
+ *   PUT  /api/my/garage    (Bearer, garage role)  -> {garage:{...}}    create/update the owner's garage
  *
  * Also serves the built React app from ../frontend/dist on the same port.
  */
@@ -32,6 +36,9 @@ public final class Main {
         Path dist = Path.of(System.getenv().getOrDefault("STATIC_DIR", "../frontend/dist")).toAbsolutePath().normalize();
         Path dataFile = Path.of(System.getenv().getOrDefault("DATA_FILE", "data/users.tsv"));
         UserStore store = new UserStore(dataFile);
+        Path garagesFile = Path.of(System.getenv().getOrDefault("GARAGES_FILE", "data/garages.json"));
+        boolean seedSamples = !"false".equalsIgnoreCase(System.getenv("SEED_SAMPLES"));
+        GarageStore garageStore = new GarageStore(garagesFile, seedSamples);
 
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.setExecutor(Executors.newFixedThreadPool(8));
@@ -39,7 +46,9 @@ public final class Main {
         server.createContext("/api/login", ex -> handle(ex, () -> login(ex, store)));
         server.createContext("/api/me", ex -> handle(ex, () -> me(ex, store)));
         server.createContext("/api/logout", ex -> handle(ex, () -> logout(ex, store)));
-        server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store)));
+        server.createContext("/api/catalog", ex -> handle(ex, () -> catalog(ex)));
+        server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store, garageStore)));
+        server.createContext("/api/my/garage", ex -> handle(ex, () -> myGarage(ex, store, garageStore)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
         System.out.println("Garage Hub running at http://localhost:" + port + "  (static: " + dist + ")");
@@ -50,6 +59,8 @@ public final class Main {
     private static void handle(HttpExchange ex, Action a) throws IOException {
         try {
             a.run();
+        } catch (GarageStore.Invalid e) {
+            send(ex, 400, Json.write(Json.obj("error", e.getMessage())));
         } catch (IllegalArgumentException e) {
             send(ex, 400, Json.write(Json.obj("error", "Invalid request")));
         } catch (Exception e) {
@@ -69,7 +80,9 @@ public final class Main {
         if (name.isEmpty() || name.length() > 80) { error(ex, 400, "Please enter your name."); return; }
         if (!EMAIL.matcher(email).matches() || email.length() > 120) { error(ex, 400, "Please enter a valid email."); return; }
         if (password.length() < 8 || password.length() > 128) { error(ex, 400, "Password must be at least 8 characters."); return; }
-        UserStore.User u = store.register(name, email, password);
+        String roleRaw = b.getOrDefault("role", UserStore.CUSTOMER);
+        if (!roleRaw.equals(UserStore.CUSTOMER) && !roleRaw.equals(UserStore.GARAGE)) { error(ex, 400, "Invalid account type."); return; }
+        UserStore.User u = store.register(name, email, password, roleRaw);
         if (u == null) { error(ex, 409, "An account with that email already exists."); return; }
         send(ex, 201, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u))));
     }
@@ -95,18 +108,40 @@ public final class Main {
         send(ex, 200, Json.write(Json.obj("ok", true)));
     }
 
+    private static void catalog(HttpExchange ex) throws Exception {
+        if (!method(ex, "GET")) return;
+        send(ex, 200, Json.write(Json.obj("services", GarageStore.catalog())));
+    }
+
     /** /api/garages (public list) and /api/garages/{id} (login required, includes prices). */
-    private static void garages(HttpExchange ex, UserStore store) throws Exception {
+    private static void garages(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         if (!method(ex, "GET")) return;
         String rest = ex.getRequestURI().getPath().substring("/api/garages".length());
         if (rest.isEmpty() || rest.equals("/")) {
-            send(ex, 200, Json.write(Json.obj("garages", Garages.list())));
+            send(ex, 200, Json.write(Json.obj("garages", garageStore.publicList())));
             return;
         }
-        if (store.userForToken(bearer(ex)) == null) { error(ex, 401, "Please sign in to see services and pricing."); return; }
-        Map<String, Object> g = Garages.detail(rest.substring(1));
+        UserStore.User u = store.userForToken(bearer(ex));
+        if (u == null) { error(ex, 401, "Please sign in to see services and pricing."); return; }
+        Map<String, Object> g = garageStore.detailFor(rest.substring(1), u.email());
         if (g == null) { error(ex, 404, "Garage not found."); return; }
         send(ex, 200, Json.write(Json.obj("garage", g)));
+    }
+
+    /** The signed-in garage owner's own listing. Customers get 403. */
+    private static void myGarage(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
+        UserStore.User u = store.userForToken(bearer(ex));
+        if (u == null) { error(ex, 401, "Please sign in."); return; }
+        if (!UserStore.GARAGE.equals(u.role())) { error(ex, 403, "Only garage accounts can manage a garage."); return; }
+        String m = ex.getRequestMethod();
+        if (m.equals("GET")) {
+            send(ex, 200, Json.write(Json.obj("garage", garageStore.ownerView(u.email()))));
+        } else if (m.equals("PUT")) {
+            Map<String, Object> saved = garageStore.save(u.email(), Json.parseObject(body(ex)));
+            send(ex, 200, Json.write(Json.obj("garage", saved)));
+        } else {
+            send(ex, 405, Json.write(Json.obj("error", "Method not allowed")));
+        }
     }
 
     private static void serveStatic(HttpExchange ex, Path dist) throws IOException {
@@ -143,7 +178,7 @@ public final class Main {
     }
 
     private static Map<String, Object> userJson(UserStore.User u) {
-        return Json.obj("name", u.name(), "email", u.email());
+        return Json.obj("name", u.name(), "email", u.email(), "role", u.role());
     }
 
     private static boolean method(HttpExchange ex, String m) throws IOException {
@@ -158,8 +193,8 @@ public final class Main {
     }
 
     private static String body(HttpExchange ex) throws IOException {
-        byte[] data = ex.getRequestBody().readNBytes(16 * 1024 + 1);
-        if (data.length > 16 * 1024) throw new IllegalArgumentException("Body too large");
+        byte[] data = ex.getRequestBody().readNBytes(64 * 1024 + 1);
+        if (data.length > 64 * 1024) throw new IllegalArgumentException("Body too large");
         return new String(data, StandardCharsets.UTF_8);
     }
 
