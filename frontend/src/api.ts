@@ -134,6 +134,8 @@ export interface JobCard {
   estimateTotal: number;
   extraTotal: number;
   bookedTotal: number;
+  /** Date (YYYY-MM-DD) the next service is due; the customer is reminded by WhatsApp a week before. */
+  nextDue: string;
 }
 
 export interface JobCardInput {
@@ -142,7 +144,10 @@ export interface JobCardInput {
   technician: string;
   checklist: CheckItem[];
   work: WorkLine[];
+  nextDue: string;
 }
+
+export interface Photo { id: string; caption: string; at: string }
 
 export type PayStatus = 'unpaid' | 'reported' | 'paid';
 
@@ -182,6 +187,8 @@ export interface ApptDetail {
   garagePhone: string;
   garageAddress: string;
   customerName: string;
+  /** Only filled in for the garage side, and only if the driver gave a mobile number. */
+  customerPhone: string;
   vehicle: string;
   plate: string;
   date: string;
@@ -206,6 +213,8 @@ export interface ApptDetail {
   card: JobCard;
   cardItems: string[];
   canEditCard: boolean;
+  photos: Photo[];
+  canAddPhoto: boolean;
 }
 
 export interface BookingInput {
@@ -213,6 +222,8 @@ export interface BookingInput {
   serviceIds: string[];
   vehicle: string;
   plate: string;
+  /** Optional mobile number for WhatsApp updates. */
+  phone?: string;
   date: string;
   time: string;
   notes: string;
@@ -428,3 +439,27 @@ export const saveJobCard = (id: string, input: JobCardInput) =>
 
 export const estimateAction = (id: string, action: 'send' | 'approve' | 'decline') =>
   request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/estimate`, { method: 'POST', body: JSON.stringify({ action }) });
+
+/** Uploads one (already shrunk) photo to a job. */
+export async function uploadPhoto(id: string, blob: Blob, caption: string): Promise<{ appointment: ApptDetail }> {
+  const headers: Record<string, string> = { 'Content-Type': blob.type || 'image/jpeg' };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`/api/appointments/${encodeURIComponent(id)}/photos?caption=${encodeURIComponent(caption)}`, { method: 'POST', headers, body: blob });
+  const data = (await res.json().catch(() => null)) as ({ appointment: ApptDetail } & { error?: string }) | null;
+  if (!res.ok || !data) throw new ApiError(data?.error ?? 'Could not upload the photo.', res.status);
+  return data;
+}
+
+/** Photos need the sign-in header, so they are fetched and shown from a temporary object URL. */
+export async function fetchPhotoUrl(id: string, photoId: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(`/api/appointments/${encodeURIComponent(id)}/photos/${encodeURIComponent(photoId)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError('Could not load the photo.', res.status);
+  return URL.createObjectURL(await res.blob());
+}
+
+export const deletePhoto = (id: string, photoId: string) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/photos/${encodeURIComponent(photoId)}`, { method: 'DELETE' });

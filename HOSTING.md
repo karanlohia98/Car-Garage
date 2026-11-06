@@ -70,6 +70,9 @@ Lightsail is AWS's simple VPS. Pick region **Asia Pacific (Mumbai) ap-south-1**.
    APPOINTMENTS_FILE=/var/lib/garagehub/appointments.json
    ADMIN_FILE=/var/lib/garagehub/admin.json
    SEED_SAMPLES=false
+   BASE_URL=https://yourdomain.com
+   # optional, for real WhatsApp messages (see README):
+   # WHATSAPP_TOKEN=...  WHATSAPP_PHONE_ID=...  WHATSAPP_TEMPLATE=...
    ADMIN_USERNAME=choose-a-name
    ADMIN_PASSWORD=choose-12+-random-characters
    ```
@@ -89,7 +92,7 @@ Lightsail is AWS's simple VPS. Pick region **Asia Pacific (Mumbai) ap-south-1**.
    Then `sudo systemctl enable --now garagehub`.
 8. Install Caddy (official apt repo) and set `/etc/caddy/Caddyfile` to `yourdomain.com { reverse_proxy 127.0.0.1:8080 }`; `sudo systemctl reload caddy`.
 9. Point the domain's **A record** at the static IP. HTTPS is issued automatically.
-10. Turn on Lightsail **automatic snapshots**; update later with `git pull`, rebuild, `sudo systemctl restart garagehub`.
+10. Turn on Lightsail **automatic snapshots** (photos live in `/var/lib/garagehub/photos`, so they are covered too); update later with `git pull`, rebuild, `sudo systemctl restart garagehub`.
 
 ## Before real users arrive
 

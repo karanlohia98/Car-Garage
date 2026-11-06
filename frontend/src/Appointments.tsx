@@ -2,7 +2,8 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { FaCar, FaClock, FaMapMarkerAlt, FaPaperPlane, FaPhoneAlt } from 'react-icons/fa';
 import * as api from './api';
 import type { ApptDetail, ApptStatus, ApptSummary, GarageDetail } from './api';
-import { money } from './config';
+import { money, waLink } from './config';
+import { t } from './i18n';
 
 /** The happy path, in order. requested / declined / cancelled sit outside it. */
 const STEPS: { status: ApptStatus; label: string }[] = [
@@ -39,6 +40,86 @@ const formatStamp = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
+/** Shrinks a phone photo to at most 1280 px on the long side before uploading (keeps uploads small and fast). */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * scale));
+  c.height = Math.max(1, Math.round(bmp.height * scale));
+  c.getContext('2d')?.drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('Could not read that photo.'))), 'image/jpeg', 0.8));
+}
+
+function PhotoThumb(props: { apptId: string; photo: api.Photo; onRemove?: () => void }) {
+  const { apptId, photo, onRemove } = props;
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let made: string | null = null;
+    let dead = false;
+    api.fetchPhotoUrl(apptId, photo.id).then((u) => {
+      if (dead) URL.revokeObjectURL(u);
+      else { made = u; setUrl(u); }
+    }).catch(() => undefined);
+    return () => { dead = true; if (made) URL.revokeObjectURL(made); };
+  }, [apptId, photo.id]);
+  return (
+    <figure className="photo">
+      {url ? <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={photo.caption || 'Job photo'} /></a> : <div className="photo-wait" />}
+      {photo.caption && <figcaption>{photo.caption}</figcaption>}
+      {onRemove && <button type="button" className="icon-btn photo-x no-print" aria-label="Remove photo" onClick={onRemove}>&times;</button>}
+    </figure>
+  );
+}
+
+function PhotoSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; onError: (e: unknown) => void }) {
+  const { d, onUpdate, onError } = props;
+  const [caption, setCaption] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (d.photos.length === 0 && !d.canAddPhoto) return null;
+  const guard = async (fn: () => Promise<{ appointment: ApptDetail }>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onUpdate((await fn()).appointment);
+    } catch (e) {
+      if (e instanceof api.ApiError && e.status < 500 && e.status !== 401) setError(e.message);
+      else if (e instanceof Error && !(e instanceof api.ApiError)) setError(e.message);
+      else onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pick = (f: File | undefined) => {
+    if (!f) return;
+    void guard(async () => api.uploadPhoto(d.id, await shrinkPhoto(f), caption.trim()));
+    setCaption('');
+  };
+  return (
+    <>
+      <h5>{t('Photos')}</h5>
+      {d.photos.length > 0 && (
+        <div className="photo-grid">
+          {d.photos.map((p) => (
+            <PhotoThumb key={p.id} apptId={d.id} photo={p} onRemove={d.canEditCard ? () => void guard(() => api.deletePhoto(d.id, p.id)) : undefined} />
+          ))}
+        </div>
+      )}
+      {d.canAddPhoto && (
+        <div className="photo-add no-print">
+          <input value={caption} maxLength={80} placeholder="Caption, e.g. Worn front brake pad" aria-label="Photo caption" onChange={(e) => setCaption(e.target.value)} />
+          <label className={`btn btn-outline${busy ? ' disabled' : ''}`}>
+            {busy ? t('Uploading...') : t('Add photo')}
+            <input type="file" accept="image/*" capture="environment" hidden disabled={busy} onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
+          </label>
+        </div>
+      )}
+      {error && <div className="notice error" role="alert">{error}</div>}
+    </>
+  );
+}
+
 const FUELS = ['Empty', '1/4', '1/2', '3/4', 'Full'];
 const STATE_LABEL: Record<string, string> = { ok: 'OK', attention: 'Needs attention', notchecked: 'Not checked' };
 
@@ -53,6 +134,7 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
   const [odo, setOdo] = useState(c.odometer ? String(c.odometer) : '');
   const [fuel, setFuel] = useState(c.fuel);
   const [tech, setTech] = useState(c.technician);
+  const [nextDue, setNextDue] = useState(c.nextDue);
   const [checks, setChecks] = useState<Record<string, { state: api.CheckState; note: string }>>(() =>
     Object.fromEntries(d.cardItems.map((i) => {
       const found = c.checklist.find((x) => x.item === i);
@@ -85,6 +167,7 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
           odometer: Number(odo) || 0,
           fuel,
           technician: tech.trim(),
+          nextDue,
           checklist: d.cardItems.map((i) => ({ item: i, state: checks[i].state, note: checks[i].note.trim() })),
           work: work.map((w) => ({ ...w, text: w.text.trim(), qty: Number(w.qty), unit: Number(w.unit) })),
         }),
@@ -97,11 +180,11 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
 
   const est = c.estimate;
   return (
-    <div className="job-card" aria-label="Job card">
+    <div className="job-card" aria-label={t('Job card')}>
       <div className="job-head">
-        <h4>Job card</h4>
+        <h4>{t('Job card')}</h4>
         <button type="button" className="btn btn-ghost no-print" onClick={() => window.print()}>
-          Print
+          {t('Print')}
         </button>
       </div>
       <p className="muted job-meta">
@@ -112,30 +195,35 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       {editable ? (
         <div className="job-intake">
           <label>
-            Odometer
+            {t('Odometer')}
             <input inputMode="numeric" value={odo} onChange={(e) => { setSaved(false); setOdo(e.target.value.replace(/\D/g, '').slice(0, 7)); }} placeholder="e.g. 48200" />
           </label>
           <label>
-            Fuel level
+            {t('Fuel level')}
             <select value={fuel} onChange={(e) => { setSaved(false); setFuel(e.target.value); }}>
               <option value="">Not noted</option>
               {FUELS.map((f) => <option key={f}>{f}</option>)}
             </select>
           </label>
           <label>
-            Technician
+            {t('Technician')}
             <input value={tech} onChange={(e) => { setSaved(false); setTech(e.target.value); }} maxLength={40} placeholder="e.g. Sam" />
+          </label>
+          <label>
+            {t('Next service due')}
+            <input type="date" value={nextDue} min={localToday()} onChange={(e) => { setSaved(false); setNextDue(e.target.value); }} />
           </label>
         </div>
       ) : (
         <p className="job-meta">
           {c.odometer ? <>Odometer {c.odometer.toLocaleString()} &middot; </> : null}
           {c.fuel ? <>Fuel {c.fuel} &middot; </> : null}
-          {c.technician ? <>Technician {c.technician}</> : null}
+          {c.technician ? <>Technician {c.technician} &middot; </> : null}
+          {c.nextDue ? <>Next service due {c.nextDue}</> : null}
         </p>
       )}
 
-      <h5>Inspection</h5>
+      <h5>{t('Inspection')}</h5>
       <ul className="job-checks">
         {d.cardItems.map((i) => {
           const cur = editable ? checks[i] : c.checklist.find((x) => x.item === i) ?? { state: 'notchecked' as const, note: '' };
@@ -145,13 +233,13 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
               {editable ? (
                 <>
                   <select aria-label={`${i} state`} value={cur.state} onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], state: e.target.value as api.CheckState } }); }}>
-                    {Object.entries(STATE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    {Object.entries(STATE_LABEL).map(([k, v]) => <option key={k} value={k}>{t(v)}</option>)}
                   </select>
                   <input aria-label={`${i} note`} value={cur.note} maxLength={80} placeholder="Note" onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], note: e.target.value } }); }} />
                 </>
               ) : (
                 <>
-                  <b>{STATE_LABEL[cur.state]}</b>
+                  <b>{t(STATE_LABEL[cur.state])}</b>
                   {cur.note && <em>{cur.note}</em>}
                 </>
               )}
@@ -160,12 +248,14 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
         })}
       </ul>
 
-      <h5>Extra parts and labour</h5>
-      {work.length === 0 && !editable && <p className="muted">No extra work.</p>}
+      <PhotoSection d={d} onUpdate={onUpdate} onError={onError} />
+
+      <h5>{t('Extra parts and labour')}</h5>
+      {work.length === 0 && !editable && <p className="muted">{t('No extra work.')}</p>}
       {work.length > 0 && (
         <table className="job-work">
           <thead>
-            <tr><th>Item</th><th>Qty</th><th>Each</th><th>Total</th>{editable && <th />}</tr>
+            <tr><th>{t('Item')}</th><th>{t('Qty')}</th><th>{t('Each')}</th><th>{t('Total')}</th>{editable && <th />}</tr>
           </thead>
           <tbody>
             {work.map((w, i) => (
@@ -174,8 +264,8 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
                   {editable ? (
                     <div className="work-edit">
                       <select aria-label="Type" value={w.kind} onChange={(e) => setLine(i, { kind: e.target.value as 'part' | 'labour' })}>
-                        <option value="part">Part</option>
-                        <option value="labour">Labour</option>
+                        <option value="part">{t('Part')}</option>
+                        <option value="labour">{t('Labour')}</option>
                       </select>
                       <input aria-label="Description" value={w.text} maxLength={60} placeholder="e.g. Front brake pads" onChange={(e) => setLine(i, { text: e.target.value })} />
                     </div>
@@ -205,9 +295,9 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       )}
 
       <div className="job-totals">
-        <span>Booked services <b>{money(c.bookedTotal)}</b></span>
-        <span>Extra work <b>{money(editable ? extra : c.extraTotal)}</b></span>
-        <span className="grand">Total <b>{money(c.bookedTotal + (editable ? extra : c.extraTotal))}</b></span>
+        <span>{t('Booked services')} <b>{money(c.bookedTotal)}</b></span>
+        <span>{t('Extra work')} <b>{money(editable ? extra : c.extraTotal)}</b></span>
+        <span className="grand">{t('Total')} <b>{money(c.bookedTotal + (editable ? extra : c.extraTotal))}</b></span>
       </div>
 
       {c.work.length > 0 && (
@@ -218,8 +308,8 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
           {est === 'declined' && <span>Customer declined the extra work. Talk to them before going ahead.</span>}
           {d.role === 'customer' && est === 'sent' && (
             <span className="action-row no-print">
-              <button className="btn btn-primary" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'approve'))}>Approve extra work</button>
-              <button className="btn btn-danger" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'decline'))}>Decline</button>
+              <button className="btn btn-primary" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'approve'))}>{t('Approve extra work')}</button>
+              <button className="btn btn-danger" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'decline'))}>{t('Decline')}</button>
             </span>
           )}
         </div>
@@ -231,7 +321,7 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
           <button className="btn btn-primary" disabled={busy} onClick={save}>{saved ? 'Saved ✓' : 'Save job card'}</button>
           {c.work.length > 0 && est !== 'sent' && est !== 'approved' && (
             <button className="btn btn-outline" disabled={busy || !saved} title={saved ? '' : 'Save the job card first'} onClick={() => run(() => api.estimateAction(d.id, 'send'))}>
-              Send extra work for approval
+              {t('Send extra work for approval')}
             </button>
           )}
         </div>
@@ -261,7 +351,7 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
   };
   const label = (m: string) => api.PAY_LABELS[m as api.PayMethod] ?? m;
   return (
-    <div className="pay-box" aria-label="Payment">
+    <div className="pay-box" aria-label={t('Payment')}>
       <h4>Payment {d.total > 0 && <small>(estimated total: from {money(d.total)})</small>}</h4>
       {d.payStatus === 'paid' ? (
         <p className="pay-done">Paid{d.payMethod ? ` by ${label(d.payMethod).toLowerCase()}` : ''}. Thank you!</p>
@@ -278,15 +368,15 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
               </select>
             </label>
           )}
-          <button className="btn btn-primary" disabled={busy} onClick={() => run('confirm')}>Confirm payment received</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => run('confirm')}>{t('Confirm payment received')}</button>
         </>
       ) : d.payStatus === 'reported' ? (
         <p className="muted">You said you paid by {label(d.payMethod).toLowerCase()}. Waiting for the garage to confirm.</p>
       ) : (
         <>
-          <p className="muted">Pay the garage directly, then tell us how you paid.</p>
+          <p className="muted">{t('Pay the garage directly, then tell us how you paid.')}</p>
           <label>
-            How will you pay?
+            {t('How will you pay?')}
             <select value={method} onChange={(e) => setMethod(e.target.value)}>
               {methods.map((m) => <option key={m} value={m}>{label(m)}</option>)}
             </select>
@@ -295,7 +385,7 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
             <a className="btn btn-outline" href={d.garagePay.link} target="_blank" rel="noopener noreferrer">Open the garage&apos;s payment page</a>
           )}
           {d.garagePay?.note && <p className="muted">Garage note: {d.garagePay.note}</p>}
-          <button className="btn btn-primary" disabled={busy} onClick={() => run('report')}>I&apos;ve paid</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => run('report')}>{t('I\'ve paid')}</button>
         </>
       )}
     </div>
@@ -310,7 +400,7 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
   const [busy, setBusy] = useState(false);
   if (d.review) {
     return (
-      <div className="pay-box" aria-label="Review">
+      <div className="pay-box" aria-label={t('Review')}>
         <h4>{d.role === 'customer' ? 'Your review' : 'Customer review'}</h4>
         <p className="review-stars" aria-label={`${d.review.rating} out of 5 stars`}>{stars(d.review.rating)}</p>
         {d.review.comment && <p>{d.review.comment}</p>}
@@ -318,7 +408,7 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
     );
   }
   return (
-    <div className="pay-box" aria-label="Leave a review">
+    <div className="pay-box" aria-label={t('Leave a review')}>
       <h4>How did {d.garageName} do?</h4>
       <div className="star-pick" role="group" aria-label="Rating">
         {[1, 2, 3, 4, 5].map((n) => (
@@ -345,19 +435,19 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
           }
         }}
       >
-        Submit review
+        {t('Submit review')}
       </button>
     </div>
   );
 }
 
 export function StatusBadge({ status, label }: { status: ApptStatus; label: string }) {
-  return <span className={`status-badge s-${status}`}>{label}</span>;
+  return <span className={`status-badge s-${status}`}>{t(label)}</span>;
 }
 
 function Stepper({ status }: { status: ApptStatus }) {
   if (status === 'requested') {
-    return <div className="stepper-note wait">Waiting for the garage to accept this appointment.</div>;
+    return <div className="stepper-note wait">{t('Waiting for the garage to accept this appointment.')}</div>;
   }
   if (status === 'declined' || status === 'cancelled') {
     return (
@@ -369,7 +459,7 @@ function Stepper({ status }: { status: ApptStatus }) {
   const current = STEPS.findIndex((s) => s.status === status);
   const finished = status === 'picked_up';
   return (
-    <ol className="stepper" aria-label="Progress">
+    <ol className="stepper" aria-label={t('Progress')}>
       {STEPS.map((s, i) => (
         <li
           key={s.status}
@@ -377,7 +467,7 @@ function Stepper({ status }: { status: ApptStatus }) {
           aria-current={i === current ? 'step' : undefined}
         >
           <span>{i < current || (i === current && (status === 'completed' || finished)) ? '✓' : i + 1}</span>
-          <em>{s.label}</em>
+          <em>{t(s.label)}</em>
         </li>
       ))}
     </ol>
@@ -469,7 +559,7 @@ export function AppointmentPanel(props: {
 
   const act = async (status: ApptStatus) => {
     if (!d || busy) return;
-    if (DANGER.has(status) && !window.confirm(`${d.role === 'garage' ? GARAGE_BUTTON[status] : CUSTOMER_BUTTON[status]}? This can't be undone.`)) return;
+    if (DANGER.has(status) && !window.confirm(`${t(d.role === 'garage' ? GARAGE_BUTTON[status] : CUSTOMER_BUTTON[status])}? ${t("This can't be undone.")}`)) return;
     setBusy(true);
     try {
       const r = await api.setStatus(id, status, note.trim());
@@ -509,7 +599,7 @@ export function AppointmentPanel(props: {
       <Stepper status={d.status} />
 
       <dl className="appt-facts">
-        <dt>Services</dt>
+        <dt>{t('Services')}</dt>
         <dd>
           {d.services.map((s) => (
             <span className="fact-line" key={s.name}>
@@ -527,7 +617,7 @@ export function AppointmentPanel(props: {
         )}
         {!isGarage && (d.garagePhone || d.garageAddress) && (
           <>
-            <dt>Garage</dt>
+            <dt>{t('Garage')}</dt>
             <dd>
               {d.garageAddress && (
                 <span className="fact-line">
@@ -537,8 +627,24 @@ export function AppointmentPanel(props: {
               {d.garagePhone && (
                 <span className="fact-line">
                   <FaPhoneAlt /> <a href={`tel:${d.garagePhone.replace(/[^\d+]/g, '')}`}>{d.garagePhone}</a>
+                  {waLink(d.garagePhone, `Hi, about my booking for ${d.vehicle} (${d.plate}) on ${d.date}.`) && (
+                    <> &middot; <a href={waLink(d.garagePhone, `Hi, about my booking for ${d.vehicle} (${d.plate}) on ${d.date}.`)} target="_blank" rel="noreferrer">WhatsApp</a></>
+                  )}
                 </span>
               )}
+            </dd>
+          </>
+        )}
+        {isGarage && d.customerPhone && (
+          <>
+            <dt>{t('Customer phone')}</dt>
+            <dd>
+              <span className="fact-line">
+                <FaPhoneAlt /> <a href={`tel:${d.customerPhone.replace(/[^\d+]/g, '')}`}>{d.customerPhone}</a>
+                {waLink(d.customerPhone, `Hi ${d.customerName}, this is ${d.garageName} about your ${d.vehicle} (${d.plate}).`) && (
+                  <> &middot; <a href={waLink(d.customerPhone, `Hi ${d.customerName}, this is ${d.garageName} about your ${d.vehicle} (${d.plate}).`)} target="_blank" rel="noreferrer">WhatsApp</a></>
+                )}
+              </span>
             </dd>
           </>
         )}
@@ -565,7 +671,7 @@ export function AppointmentPanel(props: {
                 disabled={busy}
                 onClick={() => act(a.status)}
               >
-                {buttons[a.status] ?? a.label}
+                {t(buttons[a.status] ?? a.label)}
               </button>
             ))}
           </div>
@@ -577,7 +683,7 @@ export function AppointmentPanel(props: {
       {(d.canReview || d.review) && <ReviewSection d={d} onUpdate={apply} onError={handle} />}
 
       <div className="chat">
-        <h4>Messages &amp; updates</h4>
+        <h4>{t('Messages & updates')}</h4>
         <div className="chat-list" ref={listRef} aria-live="polite">
           {d.messages.map((m, i) =>
             m.from === 'system' ? (
@@ -602,14 +708,14 @@ export function AppointmentPanel(props: {
               onKeyDown={onKey}
               maxLength={300}
               placeholder={isGarage ? 'Message the customer...' : 'Message the garage...'}
-              aria-label="Message"
+              aria-label={t('Message')}
             />
-            <button className="btn btn-primary" onClick={send} disabled={busy || !text.trim()} aria-label="Send message">
+            <button className="btn btn-primary" onClick={send} disabled={busy || !text.trim()} aria-label={t('Send message')}>
               <FaPaperPlane /> Send
             </button>
           </div>
         ) : (
-          <p className="muted">This appointment is closed, so the chat is read-only.</p>
+          <p className="muted">{t('This appointment is closed, so the chat is read-only.')}</p>
         )}
       </div>
 
@@ -740,7 +846,7 @@ export function AppointmentsWorkspace(props: {
           <AppointmentPanel id={selected} onChanged={refresh} onSessionExpired={onSessionExpired} />
         ) : (
           <div className="appt-placeholder">
-            <p className="muted">Select an appointment to see its status and chat.</p>
+            <p className="muted">{t('Select an appointment to see its status and chat.')}</p>
           </div>
         )}
       </div>
@@ -770,6 +876,7 @@ export function BookingForm(props: {
   const [picked, setPicked] = useState<string[]>([]);
   const [vehicle, setVehicle] = useState('');
   const [plate, setPlate] = useState('');
+  const [phone, setPhone] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('09:00');
   const [notes, setNotes] = useState('');
@@ -792,6 +899,7 @@ export function BookingForm(props: {
         serviceIds: picked,
         vehicle: vehicle.trim(),
         plate: plate.trim().toUpperCase(),
+        phone: phone.trim(),
         date,
         time,
         notes: notes.trim(),
@@ -809,11 +917,11 @@ export function BookingForm(props: {
     return (
       <div className="book-cta">
         <div>
-          <h3>Ready to book?</h3>
+          <h3>{t('Ready to book?')}</h3>
           <p className="muted">Send {garage.name} a request. They&apos;ll accept it, and you can chat and follow the work here.</p>
         </div>
         <button className="btn btn-primary btn-lg" onClick={() => setOpen(true)}>
-          Book an appointment
+          {t('Book an appointment')}
         </button>
       </div>
     );
@@ -823,7 +931,7 @@ export function BookingForm(props: {
     <form className="book-form" onSubmit={submit} noValidate>
       <h3>Book at {garage.name}</h3>
       <fieldset>
-        <legend>Which services?</legend>
+        <legend>{t('Which services?')}</legend>
         <div className="svc-pick">
           {garage.services.map((s) => (
             <label key={s.id} className={`pick ${picked.includes(s.id) ? 'on' : ''}`}>
@@ -843,11 +951,11 @@ export function BookingForm(props: {
       </fieldset>
       <div className="two">
         <label>
-          Car make and model
+          {t('Car make and model')}
           <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="e.g. Honda Civic 2018" maxLength={60} autoComplete="off" />
         </label>
         <label>
-          Number plate
+          {t('Number plate')}
           <input
             value={plate}
             onChange={(e) => setPlate(e.target.value.toUpperCase())}
@@ -858,13 +966,17 @@ export function BookingForm(props: {
           />
         </label>
       </div>
+      <label>
+        {t('Mobile number (optional, for WhatsApp updates)')}
+        <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9+() -]/g, '').slice(0, 20))} placeholder="e.g. 98765 43210" autoComplete="tel" />
+      </label>
       <div className="two">
         <label>
-          Date
+          {t('Date')}
           <input type="date" value={date} min={localToday()} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label>
-          Time
+          {t('Time')}
           <select value={time} onChange={(e) => setTime(e.target.value)}>
             {TIME_SLOTS.map((t) => (
               <option key={t} value={t}>
@@ -876,7 +988,7 @@ export function BookingForm(props: {
       </div>
       <label>
         Short note for the garage <small>(optional, max 120 characters)</small>
-        <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={120} placeholder="e.g. Grinding noise when braking" />
+        <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={120} placeholder={t('e.g. Grinding noise when braking')} />
       </label>
       {error && (
         <div className="notice error" role="alert">
@@ -885,7 +997,7 @@ export function BookingForm(props: {
       )}
       <div className="action-row">
         <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)} disabled={busy}>
-          Cancel
+          {t('Cancel')}
         </button>
         <button type="submit" className="btn btn-primary" disabled={busy}>
           {busy ? 'Sending...' : 'Send booking request'}

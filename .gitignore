@@ -5,3 +5,6 @@ backend/out/
 .DS_Store
 admin-credentials.txt
 backend/admin-credentials.txt
+
+backend/data/photos/
+backend/data/outbox.log

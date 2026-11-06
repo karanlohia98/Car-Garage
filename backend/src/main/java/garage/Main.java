@@ -43,6 +43,23 @@ public final class Main {
         AppointmentStore appointments = new AppointmentStore(
                 Path.of(System.getenv().getOrDefault("APPOINTMENTS_FILE", "data/appointments.json")));
 
+        Path dataDir = dataFile.toAbsolutePath().getParent();
+        Notifier notifier = new Notifier(Path.of(System.getenv().getOrDefault("OUTBOX_FILE", dataDir + "/outbox.log")));
+        appointments.attach(notifier, garageStore, Path.of(System.getenv().getOrDefault("PHOTOS_DIR", dataDir + "/photos")));
+        var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "reminders");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduler.scheduleWithFixedDelay(() -> {
+            try {
+                int n = appointments.sendDueReminders();
+                if (n > 0) System.out.println("Sent " + n + " service reminder(s).");
+            } catch (Exception e) {
+                System.err.println("Reminder run failed: " + e.getMessage());
+            }
+        }, 1, 6 * 60, java.util.concurrent.TimeUnit.MINUTES);
+
         AdminStore admin = new AdminStore(Path.of(System.getenv().getOrDefault("ADMIN_FILE", "data/admin.json")),
                 Path.of(System.getenv().getOrDefault("ADMIN_CREDENTIALS_FILE", "admin-credentials.txt")));
 
@@ -64,6 +81,7 @@ public final class Main {
         server.createContext("/api/admin", ex -> handle(ex, () -> adminApi(ex, admin, garageStore)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
+        System.out.println("WhatsApp: " + (notifier.live() ? "live" : "not configured (messages are written to the outbox file)"));
         System.out.println("Garage Hub running at http://localhost:" + port + "  (static: " + dist + ")");
     }
 
@@ -210,6 +228,34 @@ public final class Main {
         } else if (parts.length == 2 && parts[1].equals("messages")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length >= 2 && parts[1].equals("photos")) {
+            if (parts.length == 2 && m.equals("POST")) {
+                byte[] data = ex.getRequestBody().readNBytes(1_600_001);
+                if (data.length > 1_600_000) {
+                    // Read and discard the rest (up to 8 MB) so the browser sees our message, not a dropped connection.
+                    java.io.InputStream in = ex.getRequestBody();
+                    byte[] sink = new byte[65536];
+                    long left = 8L * 1024 * 1024;
+                    int n;
+                    while (left > 0 && (n = in.read(sink, 0, (int) Math.min(sink.length, left))) > 0) left -= n;
+                    error(ex, 413, "Photo must be under 1.5 MB.");
+                    return;
+                }
+                String cap = query(ex).getOrDefault("caption", "");
+                send(ex, 201, Json.write(Json.obj("appointment", appts.addPhoto(id, u.email(), as, data, cap, garageStore))));
+            } else if (parts.length == 3 && m.equals("GET")) {
+                Object[] ph = appts.photo(id, parts[2], u.email(), as, garageStore);
+                byte[] data = (byte[]) ph[1];
+                ex.getResponseHeaders().set("Content-Type", (String) ph[0]);
+                ex.getResponseHeaders().set("Cache-Control", "private, max-age=3600");
+                ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+                ex.sendResponseHeaders(200, data.length);
+                try (OutputStream os = ex.getResponseBody()) { os.write(data); }
+            } else if (parts.length == 3 && m.equals("DELETE")) {
+                send(ex, 200, Json.write(Json.obj("appointment", appts.deletePhoto(id, parts[2], u.email(), as, garageStore))));
+            } else {
+                send(ex, 405, Json.write(Json.obj("error", "Method not allowed")));
+            }
         } else if (parts.length == 2 && parts[1].equals("jobcard")) {
             if (!m.equals("PUT")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.saveCard(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));

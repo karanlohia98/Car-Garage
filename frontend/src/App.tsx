@@ -12,6 +12,7 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
+import { LANGS, lang, setLang, t, tf } from './i18n';
 import { cfg, postalExample, postalRe } from './config';
 import type { GarageDetail, GarageSummary, Range, User, Where } from './api';
 import { AppointmentsWorkspace, BookingForm } from './Appointments';
@@ -233,8 +234,8 @@ export default function App({ home }: { home: 'driver' | 'owner' }) {
           <section id="bookings" className="section">
             <div className="wrap">
               <div className="section-head">
-                <p className="eyebrow">My bookings</p>
-                <h2>Your appointments</h2>
+                <p className="eyebrow">{t('My bookings')}</p>
+                <h2>{t('Your appointments')}</h2>
                 <p className="muted">Track each booking, chat with the garage and see updates as your car is worked on.</p>
               </div>
               <AppointmentsWorkspace
@@ -267,7 +268,7 @@ export default function App({ home }: { home: 'driver' | 'owner' }) {
       <footer className="footer">
         <div className="wrap">
           <span>&copy; {new Date().getFullYear()} Garage Hub. All rights reserved.</span>
-          {home === 'driver' ? <a href="/owners">Own a garage? For garage owners</a> : <a href="/">Looking for a garage?</a>}
+          {home === 'driver' ? <a href="/owners">{t('Own a garage? For garage owners')}</a> : <a href="/">{t('Looking for a garage?')}</a>}
           <span>Demo site: sample garages, contact details and prices.</span>
         </div>
       </footer>
@@ -306,30 +307,33 @@ function Header(props: {
             <circle cx="32" cy="32" r="7" fill="currentColor" />
           </svg>
           <span>
-            Garage <b>Hub</b>
+            {t('Garage')} <b>Hub</b>
           </span>
         </a>
         <nav className="nav" aria-label="Main">
           {!garageView && (
             <>
-              {home === 'driver' ? <a href="#garages">Garages</a> : <a href="#benefits">Why Garage Hub</a>}
-              <a href="#process">How it works</a>
-              {home === 'driver' ? <a href="/owners">For garage owners</a> : <a href="/">Find a garage</a>}
+              {home === 'driver' ? <a href="#garages">{t('Garages')}</a> : <a href="#benefits">{t('Why Garage Hub')}</a>}
+              <a href="#process">{t('How it works')}</a>
+              {home === 'driver' ? <a href="/owners">{t('For garage owners')}</a> : <a href="/">{t('Find a garage')}</a>}
             </>
           )}
         </nav>
         <div className="auth-actions">
+          <select className="lang-pick" aria-label={t('Language')} value={lang} onChange={(e) => setLang(e.target.value as typeof lang)}>
+            {LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+          </select>
           {checking ? null : user ? (
             <>
               {user.role === 'driver' ? (
                 <div className="view-switch" role="group" aria-label="Switch view">
                   <button className={view === 'driver' ? 'on' : ''} aria-pressed={view === 'driver'} onClick={() => onView('driver')}>
-                    <span className="full">Find a garage</span>
-                    <span className="short">Find</span>
+                    <span className="full">{t('Find a garage')}</span>
+                    <span className="short">{t('Find')}</span>
                   </button>
                   <button className={view === 'bookings' ? 'on' : ''} aria-pressed={view === 'bookings'} onClick={() => onView('bookings')}>
-                    <span className="full">My bookings</span>
-                    <span className="short">Bookings</span>
+                    <span className="full">{t('My bookings')}</span>
+                    <span className="short">{t('Bookings')}</span>
                     {unread.bookings > 0 && <span className="unread" aria-label={`${unread.bookings} unread`}>{unread.bookings}</span>}
                   </button>
                 </div>
@@ -339,18 +343,18 @@ function Header(props: {
                   {unread.garage > 0 && <span className="unread" aria-label={`${unread.garage} unread`}>{unread.garage}</span>}
                 </span>
               )}
-              <span className="hello">Hi, {user.name.split(' ')[0]}</span>
+              <span className="hello">{tf('Hi, {name}', { name: user.name.split(' ')[0] })}</span>
               <button className="btn btn-ghost" onClick={onLogout}>
-                Log out
+                {t('Log out')}
               </button>
             </>
           ) : (
             <>
               <button className="btn btn-ghost" onClick={() => onAuth('login')}>
-                {home === 'owner' ? 'Garage login' : 'Log in'}
+                {home === 'owner' ? t('Garage login') : t('Log in')}
               </button>
               <button className="btn btn-primary" onClick={() => onAuth('signup')}>
-                {home === 'owner' ? 'Register my garage' : 'Sign up'}
+                {home === 'owner' ? t('Register my garage') : t('Sign up')}
               </button>
             </>
           )}
@@ -365,38 +369,37 @@ function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode) => vo
     <section id="top" className="hero">
       <div className="wrap hero-grid">
         <div>
-          <p className="eyebrow">Local garages &middot; Honest pricing</p>
+          <p className="eyebrow">{t('Local garages · Honest pricing')}</p>
           <h1>
-            Find the right garage.
+            {t('Find the right garage.')}
             <br />
-            <span className="accent">Know the price.</span>
+            <span className="accent">{t('Know the price.')}</span>
           </h1>
           <p className="lead">
-            Browse independent garages near you, see which services each one offers, then create a free account to
-            unlock their pricing.
+            {t('Browse independent garages near you, see which services each one offers, then create a free account to unlock their pricing.')}
           </p>
           <div className="cta-row">
             {user ? (
               <a className="btn btn-primary btn-lg" href="#garages">
-                Browse garages
+                {t('Browse garages')}
               </a>
             ) : (
               <>
                 <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup')}>
-                  Create free account
+                  {t('Create free account')}
                 </button>
                 <a className="btn btn-outline btn-lg" href="#garages">
-                  Browse garages
+                  {t('Browse garages')}
                 </a>
               </>
             )}
           </div>
           <ul className="hero-points">
             <li>
-              <FaShieldAlt /> Independent, locally owned garages
+              <FaShieldAlt /> {t('Independent, locally owned garages')}
             </li>
             <li>
-              <FaStar /> Customer ratings on every listing
+              <FaStar /> {t('Customer ratings on every listing')}
             </li>
           </ul>
         </div>
@@ -453,10 +456,10 @@ function HeroArt() {
 
 function TrustStrip() {
   const items = [
-    { icon: <FaMapMarkerAlt />, title: 'Local garages', text: 'Independent shops in your neighbourhood.' },
-    { icon: <FaWrench />, title: 'Compare services', text: 'See what each garage offers at a glance.' },
-    { icon: <FaShieldAlt />, title: 'Upfront pricing', text: 'Starting prices before you visit.' },
-    { icon: <FaStar />, title: 'Rated by drivers', text: 'Ratings and review counts on every garage.' },
+    { icon: <FaMapMarkerAlt />, title: t('Local garages'), text: t('Independent shops in your neighbourhood.') },
+    { icon: <FaWrench />, title: t('Compare services'), text: t('See what each garage offers at a glance.') },
+    { icon: <FaShieldAlt />, title: t('Upfront pricing'), text: t('Starting prices before you visit.') },
+    { icon: <FaStar />, title: t('Rated by drivers'), text: t('Ratings and review counts on every garage.') },
   ];
   return (
     <section className="trust" aria-label="Why use Garage Hub">
@@ -575,7 +578,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
         </span>
       </label>
       <label>
-        How far?
+        {t('How far?')}
         <select value={range} onChange={(e) => setRange(e.target.value as Range)} aria-label="How far to search">
           <option value="exact">Only my {cfg.postalLabel}</option>
           <option value="near">Around my {cfg.postalLabel}</option>
@@ -583,7 +586,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
         </select>
       </label>
       <button type="submit" className="btn btn-primary">
-        Find garages
+        {t('Find garages')}
       </button>
       <button type="button" className="btn btn-outline loc-btn" onClick={() => void detect(false)} disabled={detecting}>
         <FaLocationArrow aria-hidden="true" /> {detecting ? 'Finding you...' : 'Use my location'}
@@ -635,8 +638,8 @@ function GaragesSection(props: {
     <section id="garages" className="section">
       <div className="wrap">
         <div className="section-head">
-          <p className="eyebrow">Garages near you</p>
-          <h2>Choose a garage</h2>
+          <p className="eyebrow">{t('Garages near you')}</p>
+          <h2>{t('Choose a garage')}</h2>
           <p className="muted">
             Enter your {cfg.postalLabel} to see garages in your area.{' '}
             {user ? 'Pick one to see its services and pricing.' : 'Sign in to see their services and pricing.'}
@@ -658,15 +661,15 @@ function GaragesSection(props: {
             <FaSearch aria-hidden="true" />
             <input
               type="search"
-              placeholder="Search by garage, neighbourhood or city"
+              placeholder={t('Search by garage, neighbourhood or city')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search garages"
+              aria-label={t('Search garages')}
             />
           </label>
           <div className="chips" role="group" aria-label="Filter by service">
             <button className={`chip ${serviceFilter === null ? 'on' : ''}`} onClick={() => setServiceFilter(null)}>
-              All services
+              {t('All services')}
             </button>
             {serviceOptions.map((s) => (
               <button
@@ -685,7 +688,7 @@ function GaragesSection(props: {
           <div className="notice error" role="alert">
             {error}{' '}
             <button className="link" onClick={onRetry}>
-              Try again
+              {t('Try again')}
             </button>
           </div>
         )}
@@ -749,16 +752,16 @@ function GaragesSection(props: {
 function Process() {
   const steps = [
     { n: '1', t: `Enter your ${cfg.postalLabel}`, d: `Share your location or type your ${cfg.postalLabel} to see garages near you.` },
-    { n: '2', t: 'Choose a garage', d: 'Open its page, read its services and reviews, then sign in to see prices.' },
-    { n: '3', t: 'Book and chat', d: 'Pick a time, then follow the job and message the garage as it goes.' },
-    { n: '4', t: 'Collect, pay, review', d: 'Pick up your car, pay the garage, and rate your experience.' },
+    { n: '2', t: t('Choose a garage'), d: t('Open its page, read its services and reviews, then sign in to see prices.') },
+    { n: '3', t: t('Book and chat'), d: t('Pick a time, then follow the job and message the garage as it goes.') },
+    { n: '4', t: t('Collect, pay, review'), d: t('Pick up your car, pay the garage, and rate your experience.') },
   ];
   return (
     <section id="process" className="section alt">
       <div className="wrap">
         <div className="section-head">
-          <p className="eyebrow">How it works</p>
-          <h2>Four simple steps</h2>
+          <p className="eyebrow">{t('How it works')}</p>
+          <h2>{t('Four simple steps')}</h2>
         </div>
         <ol className="steps">
           {steps.map((s) => (
@@ -795,7 +798,7 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
       <section id="top" className="hero">
         <div className="wrap hero-grid">
           <div>
-            <p className="eyebrow">For garage owners</p>
+            <p className="eyebrow">{t('For garage owners')}</p>
             <h1>
               Your garage, online
               <br />
@@ -807,10 +810,10 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
             </p>
             <div className="cta-row">
               <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup')}>
-                Register my garage
+                {t('Register my garage')}
               </button>
               <button className="btn btn-outline btn-lg" onClick={() => onAuth('login')}>
-                Garage login
+                {t('Garage login')}
               </button>
             </div>
           </div>
@@ -820,7 +823,7 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
       <section id="benefits" className="section">
         <div className="wrap">
           <div className="section-head">
-            <p className="eyebrow">Why Garage Hub</p>
+            <p className="eyebrow">{t('Why Garage Hub')}</p>
             <h2>Everything a garage needs</h2>
           </div>
           <ul className="benefit-grid">
@@ -836,7 +839,7 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
       <section id="process" className="section alt">
         <div className="wrap">
           <div className="section-head">
-            <p className="eyebrow">How it works</p>
+            <p className="eyebrow">{t('How it works')}</p>
             <h2>Live in four steps</h2>
           </div>
           <ol className="steps">
@@ -909,7 +912,7 @@ function AuthModal(props: {
         <button className="close" onClick={onClose} aria-label="Close">
           &times;
         </button>
-        <h2 id="auth-title">{isSignup ? (isGarage ? 'Register your garage' : 'Create your account') : 'Welcome back'}</h2>
+        <h2 id="auth-title">{isSignup ? (isGarage ? t('Register your garage') : t('Create your account')) : t('Welcome back')}</h2>
         <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
         <p className="one-account">
           {isGarage ? 'This is the garage owner login. Looking for a garage? Use the driver site.' : 'This is the driver login. Own a garage? Use the garage owner site.'}
@@ -917,12 +920,12 @@ function AuthModal(props: {
         <form onSubmit={submit} noValidate>
           {isSignup && (
             <label>
-              Full name
+              {t('Full name')}
               <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required autoFocus />
             </label>
           )}
           <label>
-            Email
+            {t('Email')}
             <input
               type="email"
               value={email}
@@ -933,7 +936,7 @@ function AuthModal(props: {
             />
           </label>
           <label>
-            Password
+            {t('Password')}
             <input
               type="password"
               value={password}
@@ -942,7 +945,7 @@ function AuthModal(props: {
               minLength={8}
               required
             />
-            {isSignup && <small>At least 8 characters.</small>}
+            {isSignup && <small>{t('At least 8 characters.')}</small>}
           </label>
           {error && (
             <div className="notice error" role="alert">
@@ -950,13 +953,13 @@ function AuthModal(props: {
             </div>
           )}
           <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
-            {busy ? 'Please wait...' : isSignup ? 'Create account' : 'Log in'}
+            {busy ? t('Please wait...') : isSignup ? t('Create account') : t('Log in')}
           </button>
         </form>
         <p className="switch">
-          {isSignup ? 'Already have an account?' : 'New here?'}{' '}
+          {isSignup ? t('Already have an account?') : t('New here?')}{' '}
           <button className="link" onClick={() => onMode(isSignup ? 'login' : 'signup')}>
-            {isSignup ? 'Log in' : 'Create an account'}
+            {isSignup ? t('Log in') : t('Create an account')}
           </button>
         </p>
       </div>

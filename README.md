@@ -125,6 +125,25 @@ Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 matches by prefix (same PIN, nearby, wider area). `COUNTRY=US` uses 5-digit ZIP codes and dollars. The frontend reads
 `/api/config`. Fresh installs seed Ahmedabad sample garages (invented) unless `SEED_SAMPLES=false`.
 
+## Notifications, photos, reminders and languages
+
+- **WhatsApp updates.** Drivers can leave a mobile number when booking. New requests, status changes, chat messages, estimates
+  and payment updates are sent to the other side's phone (the garage's profile phone, or the driver's number). Without any
+  setup the messages are only written to `outbox.log` (numbers masked), so you can try it. To send for real, create a
+  WhatsApp Business Cloud API account and set `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_ID`; messages that start a conversation
+  need an approved template, so also set `WHATSAPP_TEMPLATE` (one body variable) and `WHATSAPP_TEMPLATE_LANG`. Set `BASE_URL`
+  (for example `https://yourdomain.com`) to include a link back to the booking. There are also free "WhatsApp" click-to-chat
+  links on every booking.
+- **Photos.** The garage can attach up to 8 photos (JPEG/PNG/WebP, shrunk in the browser, 1.5 MB max) to a job. Only the
+  driver and the garage can view them. They are stored under `photos/` beside the data files (`PHOTOS_DIR` to change).
+- **Service reminders.** The garage sets "next service due" on the job card; the driver is messaged a week before (checked
+  every 6 hours).
+- **Share and QR poster.** Every garage page has a WhatsApp share link; owners can print a QR poster (the QR image is made
+  by api.qrserver.com, which only receives the public page address).
+- **Languages.** English, Gujarati and Hindi (picker in the header; the browser language is used by default). Strings are
+  translated through `frontend/src/i18n.ts`: wrap text in `t('...')` and add a row. Chat messages and errors written by the
+  server are still English, and the translations should be reviewed by a native speaker before launch.
+
 ## API
 
 | Method | Path               | Auth                | Description |

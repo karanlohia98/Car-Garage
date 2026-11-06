@@ -94,11 +94,15 @@ final class AppointmentStore {
         String estimate = "none"; // none | sent | approved | declined
         int estimateTotal;        // extra-work total at the moment it was sent
         String updatedAt = "";
+        String nextDue = "";      // date the next service is due (YYYY-MM-DD), "" = none
+        boolean reminded;         // the customer was already reminded about nextDue
     }
 
     static final List<String> CHECK_ITEMS = List.of("Brakes", "Tires", "Lights", "Battery", "Fluids", "Wipers", "Suspension", "Engine bay");
     private static final List<String> CHECK_STATES = List.of("ok", "attention", "notchecked");
     private static final List<String> FUEL = List.of("Empty", "1/4", "1/2", "3/4", "Full");
+
+    private record Photo(String id, String caption, String at) {}
 
     private record Msg(String from, String name, String text, String at) {} // from: customer | garage | system
 
@@ -126,11 +130,30 @@ final class AppointmentStore {
         String reviewComment = "";
         String reviewAt = "";
         Card card;                   // null until the garage opens the job card
+        String customerPhone = "";   // optional, used only for WhatsApp updates
+        List<Photo> photos = new ArrayList<>();
     }
 
     private final Path file;
     private final Map<String, Appt> appts = new LinkedHashMap<>(); // guarded by "this"
     private final SecureRandom random = new SecureRandom();
+
+    private Notifier notifier;   // optional
+    private GarageStore garages; // for the garage's phone number in notifications
+    private Path photoDir;       // optional
+    private static final int MAX_PHOTOS = 8;
+    private static final int MAX_PHOTO_BYTES = 1_500_000;
+
+    /** Wires in WhatsApp notifications and photo storage. Without it the store works with neither. */
+    void attach(Notifier notifier, GarageStore garages, Path photoDir) {
+        this.notifier = notifier;
+        this.garages = garages;
+        this.photoDir = photoDir;
+    }
+
+    private static String cur() {
+        return "US".equals(GarageStore.country) ? "$" : "\u20b9";
+    }
 
     AppointmentStore(Path file) throws IOException {
         this.file = file;
@@ -177,6 +200,10 @@ final class AppointmentStore {
             throw new GarageStore.Invalid("Number plate can only contain letters, numbers, spaces and dashes.");
         }
         String notes = text(b, "notes", "Note for the garage", 0, 120, false, false);
+        String phone = text(b, "phone", "Mobile number", 0, 20, false, false);
+        if (!phone.isEmpty() && (!phone.matches("[+0-9 ()-]{7,20}") || (notifier != null && notifier.normalize(phone).isEmpty()))) {
+            throw new GarageStore.Invalid("Enter a valid mobile number, or leave it empty.");
+        }
         String date = b.get("date") instanceof String s ? s.trim() : "";
         String time = b.get("time") instanceof String s ? s.trim() : "";
         try {
@@ -201,6 +228,7 @@ final class AppointmentStore {
         a.date = date;
         a.time = time;
         a.notes = notes;
+        a.customerPhone = phone;
         a.status = REQUESTED;
         a.services = lines;
         a.createdAt = a.updatedAt = Instant.now().toString();
@@ -208,6 +236,7 @@ final class AppointmentStore {
         a.unreadGarage = 1;
         appts.put(a.id, a);
         persist();
+        tell(a, "garage", "New booking request from " + customerName + " for " + a.vehicle + " (" + a.plate + ") on " + date + " at " + time + ".");
         return detailJson(a, "customer", g);
     }
 
@@ -330,7 +359,20 @@ final class AppointmentStore {
                 c.work.add(new Work(kind, what, (int) qty, (int) unit));
             }
         }
+        String due = text(b, "nextDue", "Next service date", 0, 10, false, false);
+        if (!due.isEmpty()) {
+            try {
+                LocalDate d = LocalDate.parse(due);
+                if (d.isBefore(LocalDate.now().minusDays(1)) || d.isAfter(LocalDate.now().plusYears(3))) {
+                    throw new GarageStore.Invalid("Choose a next service date within the next 3 years.");
+                }
+            } catch (DateTimeParseException e) {
+                throw new GarageStore.Invalid("Choose a valid next service date.");
+            }
+        }
+        c.nextDue = due;
         Card old = a.card;
+        c.reminded = old != null && old.reminded && old.nextDue.equals(due);
         c.estimate = old == null ? "none" : old.estimate;
         c.estimateTotal = old == null ? 0 : old.estimateTotal;
         int newExtra = 0;
@@ -359,17 +401,23 @@ final class AppointmentStore {
             if (!action.equals("send")) throw new Denied("Only the customer can approve or decline.");
             a.card.estimate = "sent";
             a.card.estimateTotal = extra;
-            addMessage(a, "system", "Estimate sent: $" + extra + " of extra work needs your approval.", role);
+            addMessage(a, "system", "Estimate sent: " + cur() + extra + " of extra work needs your approval.", role);
         } else {
             if (!a.card.estimate.equals("sent")) throw new Denied("There is no estimate waiting for you.");
             if (action.equals("approve")) a.card.estimate = "approved";
             else if (action.equals("decline")) a.card.estimate = "declined";
             else throw new GarageStore.Invalid("Choose approve or decline.");
-            addMessage(a, "system", a.customerName + " " + (action.equals("approve") ? "approved" : "declined") + " the $" + a.card.estimateTotal + " estimate.", role);
+            addMessage(a, "system", a.customerName + " " + (action.equals("approve") ? "approved" : "declined") + " the " + cur() + a.card.estimateTotal + " estimate.", role);
         }
         a.updatedAt = Instant.now().toString();
         persist();
         return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    private static List<Object> photoList(Appt a) {
+        List<Object> out = new ArrayList<>();
+        for (Photo p : a.photos) out.add(Json.obj("id", p.id(), "caption", p.caption(), "at", p.at()));
+        return out;
     }
 
     private static Map<String, Object> cardJson(Appt a) {
@@ -385,7 +433,8 @@ final class AppointmentStore {
         return Json.obj("odometer", c == null ? 0 : c.odometer, "fuel", c == null ? "" : c.fuel,
                 "technician", c == null ? "" : c.technician, "checklist", checks, "work", work,
                 "estimate", c == null ? "none" : c.estimate, "estimateTotal", c == null ? 0 : c.estimateTotal,
-                "extraTotal", extraTotal(a), "bookedTotal", booked, "exists", c != null);
+                "extraTotal", extraTotal(a), "bookedTotal", booked, "exists", c != null,
+                "nextDue", c == null ? "" : c.nextDue);
     }
 
     // ---------- payment and reviews ----------
@@ -475,6 +524,83 @@ final class AppointmentStore {
         return out;
     }
 
+    // ---------- photos ----------
+
+    private static String sniffType(byte[] d) {
+        if (d.length > 3 && (d[0] & 0xff) == 0xff && (d[1] & 0xff) == 0xd8 && (d[2] & 0xff) == 0xff) return "image/jpeg";
+        if (d.length > 8 && (d[0] & 0xff) == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G') return "image/png";
+        if (d.length > 12 && d[0] == 'R' && d[1] == 'I' && d[2] == 'F' && d[3] == 'F' && d[8] == 'W' && d[9] == 'E' && d[10] == 'B' && d[11] == 'P') return "image/webp";
+        return null;
+    }
+
+    /** The garage attaches a photo (a worn part, damage on arrival) to the job. Type is checked from the bytes, not the header. */
+    synchronized Map<String, Object> addPhoto(String id, String viewer, String as, byte[] data, String caption, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        if (!role.equals("garage")) throw new Denied("Only the garage adds photos.");
+        if (!cardOpen(a.status)) throw new Denied("Photos can be added while the job is open.");
+        if (photoDir == null) throw new GarageStore.Invalid("Photo storage is not set up.");
+        if (a.photos.size() >= MAX_PHOTOS) throw new GarageStore.Invalid("At most " + MAX_PHOTOS + " photos per job.");
+        if (data.length == 0 || data.length > MAX_PHOTO_BYTES) throw new GarageStore.Invalid("Photo must be under 1.5 MB.");
+        String type = sniffType(data);
+        if (type == null) throw new GarageStore.Invalid("Use a JPEG, PNG or WebP photo.");
+        String cap = caption == null ? "" : caption.replaceAll("[\\p{Cntrl}]", " ").trim();
+        if (cap.length() > 80) throw new GarageStore.Invalid("Caption must be at most 80 characters.");
+        String pid = newId().substring(0, 10);
+        Path dir = photoDir.resolve(a.id);
+        Files.createDirectories(dir);
+        Files.write(dir.resolve(pid + ".img"), data);
+        a.photos.add(new Photo(pid, cap, Instant.now().toString()));
+        a.updatedAt = Instant.now().toString();
+        addMessage(a, "system", "A photo was added to the job card" + (cap.isEmpty() ? "." : ": " + cap), role, a.photos.size() == 1);
+        persist();
+        return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    /** Photo bytes for either party of the appointment. Returns {type, bytes}. */
+    synchronized Object[] photo(String id, String photoId, String viewer, String as, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        roleOf(a, viewer, as, gs);
+        if (photoDir == null || a.photos.stream().noneMatch(p -> p.id().equals(photoId))) throw new NotFound("Photo not found.");
+        byte[] data = Files.readAllBytes(photoDir.resolve(a.id).resolve(photoId + ".img"));
+        return new Object[] {sniffType(data) == null ? "application/octet-stream" : sniffType(data), data};
+    }
+
+    synchronized Map<String, Object> deletePhoto(String id, String photoId, String viewer, String as, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        if (!role.equals("garage")) throw new Denied("Only the garage removes photos.");
+        if (!cardOpen(a.status)) throw new Denied("The job card is locked.");
+        if (!a.photos.removeIf(p -> p.id().equals(photoId))) throw new NotFound("Photo not found.");
+        if (photoDir != null) Files.deleteIfExists(photoDir.resolve(a.id).resolve(photoId + ".img"));
+        a.updatedAt = Instant.now().toString();
+        persist();
+        return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    // ---------- service reminders ----------
+
+    /** Sends one reminder per job when the next-service date is within a week. Run once a day. Returns how many were sent. */
+    synchronized int sendDueReminders() throws IOException {
+        LocalDate today = LocalDate.now();
+        int sent = 0;
+        for (Appt a : appts.values()) {
+            if (a.card == null || a.card.reminded || a.card.nextDue.isEmpty()) continue;
+            if (!a.status.equals(COMPLETED) && !a.status.equals(PICKED_UP)) continue;
+            LocalDate due;
+            try { due = LocalDate.parse(a.card.nextDue); } catch (DateTimeParseException e) { continue; }
+            if (due.isAfter(today.plusDays(7))) continue;
+            a.card.reminded = true;
+            addMessage(a, "system", "Reminder: your " + a.vehicle + " is due for its next service around " + a.card.nextDue + ". Book a slot on the website.", "garage");
+            sent++;
+        }
+        if (sent > 0) persist();
+        return sent;
+    }
+
     // ---------- helpers ----------
 
     private String roleOf(Appt a, String viewer, String as, GarageStore gs) {
@@ -486,10 +612,39 @@ final class AppointmentStore {
 
     /** Adds a message. `actor` is who caused it ("customer" or "garage"); only the other side gets an unread mark. */
     private void addMessage(Appt a, String from, String text, String actor) {
+        addMessage(a, from, text, actor, true);
+    }
+
+    private void addMessage(Appt a, String from, String text, String actor, boolean notify) {
         String name = from.equals("customer") ? a.customerName : from.equals("garage") ? a.garageName : "";
         a.messages.add(new Msg(from, name, text, Instant.now().toString()));
         if (actor.equals("customer")) a.unreadGarage++;
         else a.unreadCustomer++;
+        if (notify && !text.isBlank()) tell(a, actor.equals("customer") ? "garage" : "customer", text);
+    }
+
+    /** Sends a WhatsApp message to the customer or the garage about this appointment (best effort, never throws). */
+    private void tell(Appt a, String toRole, String text) {
+        if (notifier == null) return;
+        try {
+            String phone;
+            String msg;
+            if (toRole.equals("customer")) {
+                phone = a.customerPhone;
+                msg = a.garageName + ": " + text;
+            } else {
+                GarageStore.Garage g = garages == null ? null : garages.find(a.garageId);
+                phone = g == null ? "" : g.phone();
+                msg = "Garage Hub - " + a.customerName + " (" + a.vehicle + "): " + text;
+            }
+            String base = System.getenv("BASE_URL");
+            if (base != null && !base.isBlank()) {
+                msg += "\n" + base.replaceAll("/+$", "") + (toRole.equals("garage") ? "/owners" : "/") + "?view=bookings&appt=" + a.id;
+            }
+            if (phone != null && !phone.isBlank()) notifier.send(phone, msg);
+        } catch (RuntimeException e) {
+            System.err.println("Notification skipped: " + e.getMessage());
+        }
     }
 
     private static String text(Map<String, Object> b, String key, String label, int min, int max, boolean required, boolean multiline) {
@@ -553,7 +708,8 @@ final class AppointmentStore {
         for (String s : allowed) actions.add(Json.obj("status", s, "label", label(s)));
         return Json.obj("id", a.id, "role", role, "garageId", a.garageId, "garageName", a.garageName,
                 "garagePhone", g == null ? "" : g.phone(), "garageAddress", g == null ? "" : g.address(),
-                "customerName", a.customerName, "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time, "notes", a.notes,
+                "customerName", a.customerName, "customerPhone", role.equals("garage") ? a.customerPhone : "",
+                "vehicle", a.vehicle, "plate", a.plate, "date", a.date, "time", a.time, "notes", a.notes,
                 "status", a.status, "statusLabel", label(a.status), "services", services, "total", total(a),
                 "createdAt", a.createdAt, "updatedAt", a.updatedAt, "messages", messages, "actions", actions,
                 "canChat", OPEN.contains(a.status) || a.status.equals(COMPLETED),
@@ -562,6 +718,7 @@ final class AppointmentStore {
                 "canReview", finished && role.equals("customer") && a.rating == 0,
                 "review", a.rating == 0 ? null : Json.obj("rating", a.rating, "comment", a.reviewComment, "at", a.reviewAt),
                 "garagePay", g == null ? null : g.pay(),
+                "photos", photoList(a), "canAddPhoto", role.equals("garage") && cardOpen(a.status) && a.photos.size() < MAX_PHOTOS,
                 "card", cardJson(a), "cardItems", CHECK_ITEMS, "canEditCard", role.equals("garage") && cardOpen(a.status));
     }
 
@@ -573,7 +730,8 @@ final class AppointmentStore {
         for (Check k : c.checks) checks.add(Json.obj("item", k.item(), "state", k.state(), "note", k.note()));
         for (Work w : c.work) work.add(Json.obj("kind", w.kind(), "text", w.text(), "qty", w.qty(), "unit", w.unit()));
         return Json.obj("odometer", c.odometer, "fuel", c.fuel, "technician", c.technician, "checks", checks, "work", work,
-                "estimate", c.estimate, "estimateTotal", c.estimateTotal, "updatedAt", c.updatedAt);
+                "estimate", c.estimate, "estimateTotal", c.estimateTotal, "updatedAt", c.updatedAt,
+                "nextDue", c.nextDue, "reminded", c.reminded);
     }
 
     @SuppressWarnings("unchecked")
@@ -593,6 +751,8 @@ final class AppointmentStore {
         c.estimate = (String) m.getOrDefault("estimate", "none");
         c.estimateTotal = ((Number) m.getOrDefault("estimateTotal", 0)).intValue();
         c.updatedAt = (String) m.getOrDefault("updatedAt", "");
+        c.nextDue = (String) m.getOrDefault("nextDue", "");
+        c.reminded = Boolean.TRUE.equals(m.get("reminded"));
         return c;
     }
 
@@ -609,7 +769,8 @@ final class AppointmentStore {
                     "createdAt", a.createdAt, "updatedAt", a.updatedAt, "services", services, "messages", messages,
                     "unreadCustomer", a.unreadCustomer, "unreadGarage", a.unreadGarage,
                     "payStatus", a.payStatus, "payMethod", a.payMethod, "rating", a.rating,
-                    "reviewComment", a.reviewComment, "reviewAt", a.reviewAt, "card", a.card == null ? null : cardStore(a.card)));
+                    "reviewComment", a.reviewComment, "reviewAt", a.reviewAt, "customerPhone", a.customerPhone,
+                    "photos", photoList(a), "card", a.card == null ? null : cardStore(a.card)));
         }
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         Files.writeString(tmp, Json.write(Json.obj("appointments", all)), StandardCharsets.UTF_8);
@@ -654,6 +815,11 @@ final class AppointmentStore {
             a.rating = ((Number) m.getOrDefault("rating", 0)).intValue();
             a.reviewComment = (String) m.getOrDefault("reviewComment", "");
             a.reviewAt = (String) m.getOrDefault("reviewAt", "");
+            a.customerPhone = (String) m.getOrDefault("customerPhone", "");
+            for (Object po : (List<Object>) m.getOrDefault("photos", List.of())) {
+                Map<String, Object> x = (Map<String, Object>) po;
+                a.photos.add(new Photo((String) x.get("id"), (String) x.getOrDefault("caption", ""), (String) x.getOrDefault("at", "")));
+            }
             if (m.get("card") instanceof Map<?, ?> cm) a.card = cardLoad((Map<String, Object>) cm);
             appts.put(a.id, a);
         }
