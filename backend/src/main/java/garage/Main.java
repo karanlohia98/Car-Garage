@@ -8,38 +8,24 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 /**
- * Car garage backend. Zero dependencies (JDK 17+).
+ * Garage directory backend. Zero dependencies (JDK 17+).
  *
- *   POST /api/signup   {name,email,password}  -> {token,user}
- *   POST /api/login    {email,password}       -> {token,user}
- *   GET  /api/me       (Bearer token)         -> {user}
- *   POST /api/logout   (Bearer token)         -> {ok}
- *   GET  /api/services (Bearer token)         -> {services:[...]}   (login required)
+ *   POST /api/signup       {name,email,password}  -> {token,user}
+ *   POST /api/login        {email,password}       -> {token,user}
+ *   GET  /api/me           (Bearer token)         -> {user}
+ *   POST /api/logout       (Bearer token)         -> {ok}
+ *   GET  /api/garages                             -> {garages:[...]}   public: garages + service names, no prices
+ *   GET  /api/garages/{id} (Bearer token)         -> {garage:{...}}    login required: services with prices
  *
  * Also serves the built React app from ../frontend/dist on the same port.
  */
 public final class Main {
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
-
-    private static final List<Map<String, Object>> SERVICES = List.of(
-            service("oil", "Oil & Filter Change", "Full-synthetic oil, new filter, fluid top-up and a 20-point check.", 89, "45 min", "Most popular"),
-            service("brakes", "Brake Inspection & Pads", "Pad replacement, rotor check and brake fluid test for confident stopping.", 189, "1.5 hrs", ""),
-            service("tires", "Tire Rotation & Balance", "Rotate, balance and pressure-set all four tires to extend tread life.", 59, "40 min", ""),
-            service("battery", "Battery Test & Replacement", "Load test, terminal clean and fitting of a new battery if needed.", 129, "30 min", ""),
-            service("ac", "A/C Service & Recharge", "Leak check, refrigerant recharge and cabin filter swap.", 149, "1 hr", ""),
-            service("engine", "Engine Diagnostics", "Full computer scan, fault-code report and a written repair estimate.", 99, "1 hr", ""),
-            service("align", "Wheel Alignment", "Four-wheel laser alignment to fix pulling and uneven tire wear.", 109, "1 hr", ""),
-            service("full", "Full Service Package", "Oil, filters, brakes, fluids, tires and a 50-point inspection in one visit.", 349, "3 hrs", "Best value"));
-
-    private static Map<String, Object> service(String id, String name, String desc, int price, String duration, String badge) {
-        return Json.obj("id", id, "name", name, "description", desc, "price", price, "duration", duration, "badge", badge);
-    }
 
     public static void main(String[] args) throws Exception {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
@@ -53,10 +39,10 @@ public final class Main {
         server.createContext("/api/login", ex -> handle(ex, () -> login(ex, store)));
         server.createContext("/api/me", ex -> handle(ex, () -> me(ex, store)));
         server.createContext("/api/logout", ex -> handle(ex, () -> logout(ex, store)));
-        server.createContext("/api/services", ex -> handle(ex, () -> services(ex, store)));
+        server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store)));
         server.createContext("/", ex -> handle(ex, () -> serveStatic(ex, dist)));
         server.start();
-        System.out.println("Car Garage running at http://localhost:" + port + "  (static: " + dist + ")");
+        System.out.println("Garage Hub running at http://localhost:" + port + "  (static: " + dist + ")");
     }
 
     private interface Action { void run() throws Exception; }
@@ -109,10 +95,18 @@ public final class Main {
         send(ex, 200, Json.write(Json.obj("ok", true)));
     }
 
-    private static void services(HttpExchange ex, UserStore store) throws Exception {
+    /** /api/garages (public list) and /api/garages/{id} (login required, includes prices). */
+    private static void garages(HttpExchange ex, UserStore store) throws Exception {
         if (!method(ex, "GET")) return;
+        String rest = ex.getRequestURI().getPath().substring("/api/garages".length());
+        if (rest.isEmpty() || rest.equals("/")) {
+            send(ex, 200, Json.write(Json.obj("garages", Garages.list())));
+            return;
+        }
         if (store.userForToken(bearer(ex)) == null) { error(ex, 401, "Please sign in to see services and pricing."); return; }
-        send(ex, 200, Json.write(Json.obj("services", Json.list(SERVICES))));
+        Map<String, Object> g = Garages.detail(rest.substring(1));
+        if (g == null) { error(ex, 404, "Garage not found."); return; }
+        send(ex, 200, Json.write(Json.obj("garage", g)));
     }
 
     private static void serveStatic(HttpExchange ex, Path dist) throws IOException {

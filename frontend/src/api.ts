@@ -3,6 +3,19 @@ export interface User {
   email: string;
 }
 
+/** Public summary: which services a garage offers, no prices. */
+export interface GarageSummary {
+  id: string;
+  name: string;
+  area: string;
+  rating: number;
+  reviews: number;
+  hours: string;
+  tagline: string;
+  serviceIds: string[];
+  serviceNames: string[];
+}
+
 export interface Service {
   id: string;
   name: string;
@@ -10,6 +23,20 @@ export interface Service {
   price: number;
   duration: string;
   badge: string;
+}
+
+/** Full garage details with prices (login required). */
+export interface GarageDetail {
+  id: string;
+  name: string;
+  area: string;
+  address: string;
+  phone: string;
+  rating: number;
+  reviews: number;
+  hours: string;
+  tagline: string;
+  services: Service[];
 }
 
 interface AuthResponse {
@@ -70,4 +97,7 @@ export const me = () => request<{ user: User }>('/api/me');
 
 export const logout = () => request<{ ok: boolean }>('/api/logout', { method: 'POST' });
 
-export const fetchServices = () => request<{ services: Service[] }>('/api/services');
+export const fetchGarages = () => request<{ garages: GarageSummary[] }>('/api/garages');
+
+export const fetchGarage = (id: string) =>
+  request<{ garage: GarageDetail }>(`/api/garages/${encodeURIComponent(id)}`);

@@ -1,7 +1,9 @@
-import { FormEvent, ReactElement, useCallback, useEffect, useState } from 'react';
+import { FormEvent, ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  FaBolt,
   FaCarBattery,
   FaCarSide,
+  FaClipboardCheck,
   FaClock,
   FaCogs,
   FaLock,
@@ -9,6 +11,7 @@ import {
   FaOilCan,
   FaPhoneAlt,
   FaRegCircle,
+  FaSearch,
   FaShieldAlt,
   FaSnowflake,
   FaStar,
@@ -17,7 +20,7 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
-import type { Service, User } from './api';
+import type { GarageDetail, GarageSummary, User } from './api';
 
 type AuthMode = 'login' | 'signup';
 
@@ -29,13 +32,34 @@ const ICONS: Record<string, ReactElement> = {
   ac: <FaSnowflake />,
   engine: <FaTachometerAlt />,
   align: <FaCarSide />,
+  inspection: <FaClipboardCheck />,
+  ev: <FaBolt />,
   full: <FaTools />,
 };
+
+const scrollToId = (id: string) =>
+  setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 80);
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState<boolean>(!!api.getToken());
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Garage the visitor clicked before signing in; opened right after they authenticate.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const [garages, setGarages] = useState<GarageSummary[] | null>(null);
+  const [garagesError, setGaragesError] = useState<string | null>(null);
+
+  const loadGarages = useCallback(() => {
+    setGaragesError(null);
+    api
+      .fetchGarages()
+      .then((r) => setGarages(r.garages))
+      .catch((e: Error) => setGaragesError(e.message));
+  }, []);
+
+  useEffect(loadGarages, [loadGarages]);
 
   // Restore an existing session on load.
   useEffect(() => {
@@ -51,11 +75,16 @@ export default function App() {
     api.setToken(token);
     setUser(u);
     setAuthMode(null);
-    // Take the new customer straight to their pricing.
-    setTimeout(() => document.getElementById('services')?.scrollIntoView({ behavior: 'smooth' }), 80);
+    if (pendingId) {
+      setSelectedId(pendingId);
+      setPendingId(null);
+      scrollToId('garage-detail');
+    } else {
+      scrollToId('garages');
+    }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       await api.logout();
     } catch {
@@ -63,7 +92,26 @@ export default function App() {
     }
     api.setToken(null);
     setUser(null);
+    setSelectedId(null);
+  }, []);
+
+  const handleSelect = (id: string) => {
+    if (!user) {
+      setPendingId(id);
+      setAuthMode('signup');
+      return;
+    }
+    setSelectedId(id);
+    scrollToId('garage-detail');
   };
+
+  const closeAuth = () => {
+    setAuthMode(null);
+    setPendingId(null);
+  };
+
+  const selected = garages?.find((g) => g.id === selectedId) ?? null;
+  const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
   return (
     <>
@@ -71,17 +119,43 @@ export default function App() {
       <main>
         <Hero user={user} onAuth={setAuthMode} />
         <TrustStrip />
-        <ServicesSection user={user} checking={checking} onAuth={setAuthMode} onSessionExpired={handleLogout} />
+        <GaragesSection
+          garages={garages}
+          error={garagesError}
+          onRetry={loadGarages}
+          user={user}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+        />
+        {user && selectedId && (
+          <GarageDetailSection
+            key={selectedId}
+            id={selectedId}
+            summary={selected}
+            onSessionExpired={handleLogout}
+            onBack={() => {
+              setSelectedId(null);
+              scrollToId('garages');
+            }}
+          />
+        )}
         <Process />
-        <Contact />
       </main>
       <footer className="footer">
         <div className="wrap">
-          <span>&copy; {new Date().getFullYear()} Redline Auto Garage. All rights reserved.</span>
-          <span>Demo site: contact details and prices are sample data.</span>
+          <span>&copy; {new Date().getFullYear()} Garage Hub. All rights reserved.</span>
+          <span>Demo site: garages, contact details and prices are sample data.</span>
         </div>
       </footer>
-      {authMode && <AuthModal mode={authMode} onMode={setAuthMode} onClose={() => setAuthMode(null)} onAuthed={handleAuthed} />}
+      {authMode && (
+        <AuthModal
+          mode={authMode}
+          pendingName={pending?.name ?? null}
+          onMode={setAuthMode}
+          onClose={closeAuth}
+          onAuthed={handleAuthed}
+        />
+      )}
     </>
   );
 }
@@ -96,19 +170,18 @@ function Header(props: {
   return (
     <header className="header">
       <div className="wrap header-inner">
-        <a href="#top" className="brand" aria-label="Redline Auto Garage home">
+        <a href="#top" className="brand" aria-label="Garage Hub home">
           <svg viewBox="0 0 64 64" width="34" height="34" aria-hidden="true">
             <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" strokeWidth="7" strokeDasharray="10 5" />
             <circle cx="32" cy="32" r="7" fill="currentColor" />
           </svg>
           <span>
-            Redline <b>Auto Garage</b>
+            Garage <b>Hub</b>
           </span>
         </a>
         <nav className="nav" aria-label="Main">
-          <a href="#services">Services</a>
+          <a href="#garages">Garages</a>
           <a href="#process">How it works</a>
-          <a href="#contact">Visit us</a>
         </nav>
         <div className="auth-actions">
           {checking ? null : user ? (
@@ -139,38 +212,38 @@ function Hero({ user, onAuth }: { user: User | null; onAuth: (m: AuthMode) => vo
     <section id="top" className="hero">
       <div className="wrap hero-grid">
         <div>
-          <p className="eyebrow">Independent garage &middot; Since 2009</p>
+          <p className="eyebrow">Local garages &middot; Honest pricing</p>
           <h1>
-            Keep it running.
+            Find the right garage.
             <br />
-            <span className="accent">Keep it honest.</span>
+            <span className="accent">Know the price.</span>
           </h1>
           <p className="lead">
-            Fair prices, clear quotes and certified technicians for every make and model. Create a free account to
-            see our full service menu and pricing.
+            Browse independent garages near you, see which services each one offers, then create a free account to
+            unlock their pricing.
           </p>
           <div className="cta-row">
             {user ? (
-              <a className="btn btn-primary btn-lg" href="#services">
-                View services &amp; pricing
+              <a className="btn btn-primary btn-lg" href="#garages">
+                Browse garages
               </a>
             ) : (
               <>
                 <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup')}>
                   Create free account
                 </button>
-                <button className="btn btn-outline btn-lg" onClick={() => onAuth('login')}>
-                  I already have one
-                </button>
+                <a className="btn btn-outline btn-lg" href="#garages">
+                  Browse garages
+                </a>
               </>
             )}
           </div>
           <ul className="hero-points">
             <li>
-              <FaShieldAlt /> 12-month / 12,000-mile warranty
+              <FaShieldAlt /> Independent, locally owned garages
             </li>
             <li>
-              <FaStar /> 4.9 average customer rating
+              <FaStar /> Customer ratings on every listing
             </li>
           </ul>
         </div>
@@ -195,12 +268,10 @@ function HeroArt() {
             <stop offset="1" stopColor="#5b86a8" />
           </linearGradient>
         </defs>
-        {/* garage floor + lift */}
         <rect x="20" y="340" width="520" height="10" rx="5" fill="#2a2e35" />
         <rect x="90" y="300" width="14" height="42" fill="#3a3f48" />
         <rect x="456" y="300" width="14" height="42" fill="#3a3f48" />
         <rect x="70" y="292" width="420" height="12" rx="4" fill="#4a505b" />
-        {/* car */}
         <path
           d="M70 272 C70 248 88 238 112 234 L170 226 C190 196 216 180 252 178 L330 178 C366 180 396 200 418 228 L458 236 C480 241 492 252 492 272 L492 282 L70 282 Z"
           fill="url(#body)"
@@ -217,7 +288,6 @@ function HeroArt() {
             <circle cx={cx} cy="282" r="7" fill="#16181c" />
           </g>
         ))}
-        {/* floating gear */}
         <g className="gear" transform="translate(470 96)">
           <circle r="42" fill="none" stroke="#ff6a1a" strokeWidth="14" strokeDasharray="14 9" />
           <circle r="26" fill="#1b1e23" stroke="#ff6a1a" strokeWidth="4" />
@@ -230,13 +300,13 @@ function HeroArt() {
 
 function TrustStrip() {
   const items = [
-    { icon: <FaWrench />, title: 'Certified techs', text: 'ASE-certified mechanics on every job.' },
-    { icon: <FaClock />, title: 'Same-day service', text: 'Most routine work done while you wait.' },
-    { icon: <FaShieldAlt />, title: 'Written warranty', text: 'Parts and labor covered for 12 months.' },
-    { icon: <FaTools />, title: 'All makes & models', text: 'Domestic, import, hybrid and EV checks.' },
+    { icon: <FaMapMarkerAlt />, title: 'Local garages', text: 'Independent shops in your neighbourhood.' },
+    { icon: <FaWrench />, title: 'Compare services', text: 'See what each garage offers at a glance.' },
+    { icon: <FaShieldAlt />, title: 'Upfront pricing', text: 'Starting prices before you visit.' },
+    { icon: <FaStar />, title: 'Rated by drivers', text: 'Ratings and review counts on every garage.' },
   ];
   return (
-    <section className="trust" aria-label="Why choose us">
+    <section className="trust" aria-label="Why use Garage Hub">
       <div className="wrap trust-grid">
         {items.map((i) => (
           <div className="trust-item" key={i.title}>
@@ -252,44 +322,192 @@ function TrustStrip() {
   );
 }
 
-function ServicesSection(props: {
+function Stars({ rating, reviews }: { rating: number; reviews: number }) {
+  return (
+    <span className="rating" aria-label={`Rated ${rating} out of 5 from ${reviews} reviews`}>
+      <FaStar /> <b>{rating.toFixed(1)}</b> <small>({reviews})</small>
+    </span>
+  );
+}
+
+function GaragesSection(props: {
+  garages: GarageSummary[] | null;
+  error: string | null;
+  onRetry: () => void;
   user: User | null;
-  checking: boolean;
-  onAuth: (m: AuthMode) => void;
-  onSessionExpired: () => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
-  const { user, checking, onAuth, onSessionExpired } = props;
-  const [services, setServices] = useState<Service[] | null>(null);
+  const { garages, error, onRetry, user, selectedId, onSelect } = props;
+  const [query, setQuery] = useState('');
+  const [serviceFilter, setServiceFilter] = useState<string | null>(null);
+
+  // Every service offered by at least one garage, for the filter chips.
+  const serviceOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    garages?.forEach((g) => g.serviceIds.forEach((id, i) => map.set(id, g.serviceNames[i])));
+    return Array.from(map, ([id, name]) => ({ id, name }));
+  }, [garages]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (garages ?? []).filter(
+      (g) =>
+        (!serviceFilter || g.serviceIds.includes(serviceFilter)) &&
+        (!q || g.name.toLowerCase().includes(q) || g.area.toLowerCase().includes(q)),
+    );
+  }, [garages, query, serviceFilter]);
+
+  return (
+    <section id="garages" className="section">
+      <div className="wrap">
+        <div className="section-head">
+          <p className="eyebrow">Garages near you</p>
+          <h2>Choose a garage</h2>
+          <p className="muted">
+            Compare what each garage offers.{' '}
+            {user ? 'Pick one to see its services and pricing.' : 'Sign in to see their services and pricing.'}
+          </p>
+        </div>
+
+        <div className="filters">
+          <label className="search">
+            <FaSearch aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Search by garage or neighbourhood"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search garages"
+            />
+          </label>
+          <div className="chips" role="group" aria-label="Filter by service">
+            <button className={`chip ${serviceFilter === null ? 'on' : ''}`} onClick={() => setServiceFilter(null)}>
+              All services
+            </button>
+            {serviceOptions.map((s) => (
+              <button
+                key={s.id}
+                className={`chip ${serviceFilter === s.id ? 'on' : ''}`}
+                aria-pressed={serviceFilter === s.id}
+                onClick={() => setServiceFilter(serviceFilter === s.id ? null : s.id)}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div className="notice error" role="alert">
+            {error}{' '}
+            <button className="link" onClick={onRetry}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {!garages && !error && (
+          <div className="garage-grid" aria-busy="true">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div className="garage-card skeleton" key={i} />
+            ))}
+          </div>
+        )}
+
+        {garages && visible.length === 0 && <p className="muted empty">No garages match your search. Try clearing a filter.</p>}
+
+        {garages && visible.length > 0 && (
+          <div className="garage-grid">
+            {visible.map((g) => (
+              <article className={`garage-card ${g.id === selectedId ? 'selected' : ''}`} key={g.id}>
+                <div className="garage-top">
+                  <div>
+                    <h3>{g.name}</h3>
+                    <p className="area">
+                      <FaMapMarkerAlt /> {g.area}, Seattle
+                    </p>
+                  </div>
+                  <Stars rating={g.rating} reviews={g.reviews} />
+                </div>
+                <p className="tagline">{g.tagline}</p>
+                <p className="open-hours">
+                  <FaClock /> {g.hours}
+                </p>
+                <ul className="tags" aria-label="Services offered">
+                  {g.serviceIds.map((id, i) => (
+                    <li key={id} className={id === serviceFilter ? 'match' : ''}>
+                      {ICONS[id] ?? <FaWrench />} {g.serviceNames[i]}
+                    </li>
+                  ))}
+                </ul>
+                <button className="btn btn-primary btn-block" onClick={() => onSelect(g.id)}>
+                  {!user && <FaLock />} {g.id === selectedId ? 'Viewing services & pricing' : 'View services & pricing'}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GarageDetailSection(props: {
+  id: string;
+  summary: GarageSummary | null;
+  onSessionExpired: () => void;
+  onBack: () => void;
+}) {
+  const { id, summary, onSessionExpired, onBack } = props;
+  const [garage, setGarage] = useState<GarageDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
     api
-      .fetchServices()
-      .then((r) => setServices(r.services))
+      .fetchGarage(id)
+      .then((r) => setGarage(r.garage))
       .catch((e: api.ApiError) => {
         if (e.status === 401) onSessionExpired();
         else setError(e.message);
       });
-  }, [onSessionExpired]);
+  }, [id, onSessionExpired]);
 
-  useEffect(() => {
-    if (user) load();
-    else setServices(null);
-  }, [user, load]);
+  useEffect(load, [load]);
 
+  const name = garage?.name ?? summary?.name ?? 'Garage';
   return (
-    <section id="services" className="section">
+    <section id="garage-detail" className="section alt">
       <div className="wrap">
-        <div className="section-head">
-          <p className="eyebrow">Services &amp; pricing</p>
-          <h2>Everything your car needs, priced up front</h2>
-          <p className="muted">Starting prices for a standard passenger vehicle. We confirm the exact quote before any work begins.</p>
+        <button className="link back" onClick={onBack}>
+          &larr; Back to all garages
+        </button>
+        <div className="detail-head">
+          <div>
+            <p className="eyebrow">Services &amp; pricing</p>
+            <h2>{name}</h2>
+            <p className="muted">{garage?.tagline ?? summary?.tagline}</p>
+          </div>
+          {garage && (
+            <ul className="detail-meta">
+              <li>
+                <Stars rating={garage.rating} reviews={garage.reviews} />
+              </li>
+              <li>
+                <FaMapMarkerAlt /> {garage.address}
+              </li>
+              <li>
+                <FaClock /> {garage.hours}
+              </li>
+              <li>
+                <FaPhoneAlt /> <a href={`tel:${garage.phone.replace(/[^\d+]/g, '')}`}>{garage.phone}</a>
+              </li>
+            </ul>
+          )}
         </div>
 
-        {!user && !checking && <LockedServices onAuth={onAuth} />}
-
-        {user && error && (
+        {error && (
           <div className="notice error" role="alert">
             {error}{' '}
             <button className="link" onClick={load}>
@@ -298,92 +516,58 @@ function ServicesSection(props: {
           </div>
         )}
 
-        {user && !services && !error && (
+        {!garage && !error && (
           <div className="cards" aria-busy="true">
-            {Array.from({ length: 8 }).map((_, i) => (
+            {Array.from({ length: Math.min(summary?.serviceIds.length ?? 4, 8) }).map((_, i) => (
               <div className="card skeleton" key={i} />
             ))}
           </div>
         )}
 
-        {user && services && (
-          <div className="cards">
-            {services.map((s) => (
-              <article className="card" key={s.id}>
-                {s.badge && <span className="badge">{s.badge}</span>}
-                <span className="card-icon">{ICONS[s.id] ?? <FaWrench />}</span>
-                <h3>{s.name}</h3>
-                <p>{s.description}</p>
-                <div className="card-foot">
-                  <div className="price">
-                    <small>from</small> ${s.price}
+        {garage && (
+          <>
+            <div className="cards">
+              {garage.services.map((s) => (
+                <article className="card" key={s.id}>
+                  {s.badge && <span className="badge">{s.badge}</span>}
+                  <span className="card-icon">{ICONS[s.id] ?? <FaWrench />}</span>
+                  <h3>{s.name}</h3>
+                  <p>{s.description}</p>
+                  <div className="card-foot">
+                    <div className="price">
+                      <small>from</small> ${s.price}
+                    </div>
+                    <div className="duration">
+                      <FaClock /> {s.duration}
+                    </div>
                   </div>
-                  <div className="duration">
-                    <FaClock /> {s.duration}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-
-        {user && services && (
-          <p className="booking-note">
-            <FaPhoneAlt /> Ready to book? Call <a href="tel:+12065550142">(206) 555-0142</a> or drop in during opening hours.
-          </p>
+                </article>
+              ))}
+            </div>
+            <p className="booking-note">
+              <FaPhoneAlt />
+              <span>
+                Ready to book? Call {garage.name} on{' '}
+                <a href={`tel:${garage.phone.replace(/[^\d+]/g, '')}`}>{garage.phone}</a> or drop in during opening
+                hours. Prices are starting prices for a standard passenger vehicle.
+              </span>
+            </p>
+          </>
         )}
       </div>
     </section>
   );
 }
 
-function LockedServices({ onAuth }: { onAuth: (m: AuthMode) => void }) {
-  const teaser = ['Oil & Filter Change', 'Brake Inspection & Pads', 'Tire Rotation & Balance', 'Engine Diagnostics'];
-  return (
-    <div className="locked">
-      <div className="cards blurred" aria-hidden="true">
-        {teaser.map((t) => (
-          <div className="card" key={t}>
-            <span className="card-icon">
-              <FaWrench />
-            </span>
-            <h3>{t}</h3>
-            <p>Detailed description of what is included in this service.</p>
-            <div className="card-foot">
-              <div className="price">$•••</div>
-              <div className="duration">•• min</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="locked-cta">
-        <span className="lock">
-          <FaLock />
-        </span>
-        <h3>Sign in to see our services and prices</h3>
-        <p>It takes less than a minute and it&apos;s free.</p>
-        <div className="cta-row">
-          <button className="btn btn-primary" onClick={() => onAuth('signup')}>
-            Create account
-          </button>
-          <button className="btn btn-outline" onClick={() => onAuth('login')}>
-            Log in
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Process() {
   const steps = [
-    { n: '1', t: 'Create your account', d: 'Sign up free to unlock our service menu and pricing.' },
-    { n: '2', t: 'Pick your service', d: 'Compare options and starting prices at your own pace.' },
-    { n: '3', t: 'Drop in or call', d: 'We confirm your exact quote before touching the car.' },
-    { n: '4', t: 'Drive away happy', d: 'Every job comes with a written 12-month warranty.' },
+    { n: '1', t: 'Create your account', d: 'Sign up free to unlock garage pricing.' },
+    { n: '2', t: 'Choose a garage', d: 'Search by name or area, or filter by the service you need.' },
+    { n: '3', t: 'Compare services & prices', d: "See exactly what that garage offers and what it costs." },
+    { n: '4', t: 'Call or drop in', d: 'Book directly with the garage using the details on its page.' },
   ];
   return (
-    <section id="process" className="section alt">
+    <section id="process" className="section">
       <div className="wrap">
         <div className="section-head">
           <p className="eyebrow">How it works</p>
@@ -403,47 +587,14 @@ function Process() {
   );
 }
 
-function Contact() {
-  return (
-    <section id="contact" className="section">
-      <div className="wrap contact-grid">
-        <div>
-          <p className="eyebrow">Visit us</p>
-          <h2>Find the garage</h2>
-          <ul className="contact-list">
-            <li>
-              <FaMapMarkerAlt /> 1420 Industrial Way, Seattle, WA 98134
-            </li>
-            <li>
-              <FaPhoneAlt /> <a href="tel:+12065550142">(206) 555-0142</a>
-            </li>
-          </ul>
-        </div>
-        <div className="hours">
-          <h3>
-            <FaClock /> Opening hours
-          </h3>
-          <dl>
-            <dt>Mon &ndash; Fri</dt>
-            <dd>8:00 am &ndash; 6:00 pm</dd>
-            <dt>Saturday</dt>
-            <dd>9:00 am &ndash; 3:00 pm</dd>
-            <dt>Sunday</dt>
-            <dd>Closed</dd>
-          </dl>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function AuthModal(props: {
   mode: AuthMode;
+  pendingName: string | null;
   onMode: (m: AuthMode) => void;
   onClose: () => void;
   onAuthed: (token: string, user: User) => void;
 }) {
-  const { mode, onMode, onClose, onAuthed } = props;
+  const { mode, pendingName, onMode, onClose, onAuthed } = props;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -474,6 +625,7 @@ function AuthModal(props: {
   };
 
   const isSignup = mode === 'signup';
+  const reason = pendingName ? `to see ${pendingName}'s services and pricing` : 'to see garage services and pricing';
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -481,7 +633,7 @@ function AuthModal(props: {
           &times;
         </button>
         <h2 id="auth-title">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
-        <p className="muted">{isSignup ? 'Sign up to view our services and pricing.' : 'Log in to see our services and pricing.'}</p>
+        <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
         <form onSubmit={submit} noValidate>
           {isSignup && (
             <label>
