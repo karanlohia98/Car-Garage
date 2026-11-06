@@ -104,7 +104,7 @@ export default function SitePage({ id }: { id: string }) {
         )}
         {detail && !detail.mine && site.live && (
           <div className="site-book">
-            <BookingForm garage={detail} onBooked={() => { window.location.href = '/?view=bookings'; }} onSessionExpired={() => { api.setToken(null); window.location.reload(); }} />
+            <BookingForm garage={detail} onBooked={(apptId) => { window.location.href = `/?view=bookings&appt=${encodeURIComponent(apptId)}`; }} onSessionExpired={() => { api.setToken(null); window.location.reload(); }} />
           </div>
         )}
         {detail?.mine && <p className="s-muted">This is your page. Customers book from here once it is live.</p>}

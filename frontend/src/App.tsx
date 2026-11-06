@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FaClock,
+  FaLocationArrow,
   FaExternalLinkAlt,
   FaLock,
   FaMapMarkerAlt,
@@ -56,7 +57,6 @@ export default function App() {
   // Appointment to open when the bookings screen appears (set right after booking).
   const [focusApptId, setFocusApptId] = useState<string | null>(null);
   const [unread, setUnread] = useState<Unread>({ bookings: 0, garage: 0 });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   // Garage the visitor clicked before signing in; opened right after they authenticate.
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -83,7 +83,6 @@ export default function App() {
   const changeWhere = (w: Where | null) => {
     saveWhere(w);
     setGarages(null);
-    setSelectedId(null);
     setWhereState(w);
   };
 
@@ -93,6 +92,7 @@ export default function App() {
     const q = new URLSearchParams(window.location.search);
     const gid = q.get('garage');
     const wantBookings = q.get('view') === 'bookings';
+    const apptId = q.get('appt');
     if (gid || q.has('view')) window.history.replaceState(null, '', '/');
     if (!api.getToken()) {
       setChecking(false);
@@ -107,11 +107,11 @@ export default function App() {
       .then((r) => {
         setUser(r.user);
         if (r.user.role === 'garage') setView('garage');
-        else if (gid) {
-          setSelectedId(gid);
-          scrollToId('garage-detail');
+        else if (gid) window.location.replace(`/g/${encodeURIComponent(gid)}`);
+        if (wantBookings && r.user.role === 'driver') {
+          setFocusApptId(apptId);
+          setView('bookings');
         }
-        if (wantBookings && r.user.role === 'driver') setView('bookings');
       })
       .catch(() => api.setToken(null))
       .finally(() => setChecking(false));
@@ -175,10 +175,7 @@ export default function App() {
       setView('garage');
       window.scrollTo({ top: 0 });
     } else if (pendingId) {
-      setView('driver');
-      setSelectedId(pendingId);
-      setPendingId(null);
-      scrollToId('garage-detail');
+      window.location.assign(`/g/${encodeURIComponent(pendingId)}`);
     } else {
       setView('driver');
       scrollToId('garages');
@@ -193,19 +190,13 @@ export default function App() {
     }
     api.setToken(null);
     setUser(null);
-    setSelectedId(null);
     setView('driver');
     setFocusApptId(null);
   }, []);
 
+  /** Choosing a garage opens its own page (its website). Prices and booking there need a driver login. */
   const handleSelect = (id: string) => {
-    if (!user) {
-      setPendingId(id);
-      openAuth('signup', 'driver');
-      return;
-    }
-    setSelectedId(id);
-    scrollToId('garage-detail');
+    window.location.assign(`/g/${encodeURIComponent(id)}`);
   };
 
   const closeAuth = () => {
@@ -215,7 +206,6 @@ export default function App() {
 
   const showGarageView = !!user && user.role === 'garage';
   const showBookings = !!user && user.role === 'driver' && view === 'bookings';
-  const selected = garages?.find((g) => g.id === selectedId) ?? null;
   const pending = garages?.find((g) => g.id === pendingId) ?? null;
 
   return (
@@ -265,22 +255,8 @@ export default function App() {
               error={garagesError}
               onRetry={loadGarages}
               user={user}
-              selectedId={selectedId}
               onSelect={handleSelect}
             />
-            {user && selectedId && (
-              <GarageDetailSection
-                key={selectedId}
-                id={selectedId}
-                summary={selected}
-                onSessionExpired={handleLogout}
-                onBooked={handleBooked}
-                onBack={() => {
-                  setSelectedId(null);
-                  scrollToId('garages');
-                }}
-              />
-            )}
             <Process />
             <ForGarages onStart={startGarage} onLogin={() => openAuth('login', 'garage')} />
           </>
@@ -499,11 +475,78 @@ function TrustStrip() {
 }
 
 /** ZIP code and range picker. Drivers must choose a location before any garages are shown. */
+/**
+ * Asks the browser for the visitor's position (only if they allow it) and turns it into a ZIP code using
+ * OpenStreetMap's Nominatim reverse geocoder, called straight from the browser. Rejects with a short message.
+ */
+function detectZip(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) return reject(new Error('Your browser can\'t share its location.'));
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords;
+          const r = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${latitude}&lon=${longitude}`,
+            { headers: { Accept: 'application/json' } },
+          );
+          const data = (await r.json()) as { address?: { postcode?: string; country_code?: string } };
+          const zip = /\b\d{5}\b/.exec(data.address?.postcode ?? '')?.[0];
+          if (!zip || (data.address?.country_code && data.address.country_code !== 'us')) {
+            return reject(new Error('We could only find a ZIP code for locations in the US.'));
+          }
+          resolve(zip);
+        } catch {
+          reject(new Error('Could not work out your ZIP code from your location.'));
+        }
+      },
+      (err) =>
+        reject(
+          new Error(
+            err.code === err.PERMISSION_DENIED
+              ? 'Location access is blocked in your browser.'
+              : 'Could not get your location.',
+          ),
+        ),
+      { timeout: 10000, maximumAge: 10 * 60 * 1000 },
+    );
+  });
+}
+
 function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }) {
   const { where, onWhere } = props;
   const [zip, setZip] = useState(where?.zip ?? '');
   const [range, setRange] = useState<Range>(where?.range ?? 'near');
   const [error, setError] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const detect = useCallback(
+    async (auto: boolean) => {
+      setDetecting(true);
+      setNote(null);
+      setError(null);
+      try {
+        const found = await detectZip();
+        setZip(found);
+        onWhere({ zip: found, range });
+      } catch (e) {
+        // Automatic attempts fail quietly into manual entry; a button press explains what went wrong.
+        setNote(`${e instanceof Error ? e.message : 'Could not detect your location.'} Please enter your ZIP code.`);
+        if (auto) document.getElementById('zip-input')?.focus();
+      } finally {
+        setDetecting(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onWhere, range],
+  );
+
+  // First visit with no saved location: ask the browser. If the visitor declines, they type their ZIP instead.
+  useEffect(() => {
+    if (!where) void detect(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -526,6 +569,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
             maxLength={5}
             placeholder="e.g. 98108"
             aria-label="Your ZIP code"
+            id="zip-input"
           />
         </span>
       </label>
@@ -540,6 +584,10 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
       <button type="submit" className="btn btn-primary">
         Find garages
       </button>
+      <button type="button" className="btn btn-outline loc-btn" onClick={() => void detect(false)} disabled={detecting}>
+        <FaLocationArrow aria-hidden="true" /> {detecting ? 'Finding you...' : 'Use my location'}
+      </button>
+      {note && <span className="loc-note" role="status">{note}</span>}
       {error && (
         <span className="loc-error" role="alert">
           {error}
@@ -556,10 +604,9 @@ function GaragesSection(props: {
   error: string | null;
   onRetry: () => void;
   user: User | null;
-  selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const { where, onWhere, garages, error, onRetry, user, selectedId, onSelect } = props;
+  const { where, onWhere, garages, error, onRetry, user, onSelect } = props;
   const [query, setQuery] = useState('');
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
 
@@ -661,7 +708,7 @@ function GaragesSection(props: {
         {garages && visible.length > 0 && (
           <div className="garage-grid">
             {visible.map((g) => (
-              <article className={`garage-card ${g.id === selectedId ? 'selected' : ''}`} key={g.id}>
+              <article className="garage-card" key={g.id}>
                 <div className="garage-top">
                   <div>
                     <h3>{g.name}</h3>
@@ -685,7 +732,7 @@ function GaragesSection(props: {
                 </ul>
                 <button className="btn btn-primary btn-block" onClick={() => onSelect(g.id)}>
                   {!user && <FaLock />}{' '}
-                  {g.id === selectedId ? 'Viewing services & pricing' : g.mode === 'website' ? 'View services' : 'View services & pricing'}
+                  Visit garage page
                 </button>
               </article>
             ))}
@@ -693,145 +740,6 @@ function GaragesSection(props: {
         )}
         </>
         )}
-      </div>
-    </section>
-  );
-}
-
-function GarageDetailSection(props: {
-  id: string;
-  summary: GarageSummary | null;
-  onSessionExpired: () => void;
-  onBooked: (appointmentId: string) => void;
-  onBack: () => void;
-}) {
-  const { id, summary, onSessionExpired, onBooked, onBack } = props;
-  const [garage, setGarage] = useState<GarageDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setError(null);
-    api
-      .fetchGarage(id)
-      .then((r) => setGarage(r.garage))
-      .catch((e: api.ApiError) => {
-        if (e.status === 401) onSessionExpired();
-        else setError(e.message);
-      });
-  }, [id, onSessionExpired]);
-
-  useEffect(load, [load]);
-
-  const name = garage?.name ?? summary?.name ?? 'Garage';
-  const tel = garage ? `tel:${garage.phone.replace(/[^\d+]/g, '')}` : '';
-  const toWebsite = garage?.mode === 'website' && isHttpUrl(garage.website);
-  return (
-    <section id="garage-detail" className="section alt">
-      <div className="wrap">
-        <button className="link back" onClick={onBack}>
-          &larr; Back to all garages
-        </button>
-        <div className="detail-head">
-          <div>
-            <p className="eyebrow">{toWebsite ? 'Services' : 'Services & pricing'}</p>
-            <h2>{name}</h2>
-            <p className="muted">{garage?.tagline ?? summary?.tagline}</p>
-          </div>
-          {garage && (
-            <ul className="detail-meta">
-              <li>
-                <Stars rating={garage.rating} reviews={garage.reviews} />
-              </li>
-              <li>
-                <FaMapMarkerAlt /> {fullAddress(garage)}
-              </li>
-              <li>
-                <FaClock /> {garage.hours}
-              </li>
-              <li>
-                <FaPhoneAlt /> <a href={tel}>{garage.phone}</a>
-              </li>
-            </ul>
-          )}
-        </div>
-
-        {error && (
-          <div className="notice error" role="alert">
-            {error}{' '}
-            <button className="link" onClick={load}>
-              Try again
-            </button>
-          </div>
-        )}
-
-        {!garage && !error && (
-          <div className="cards" aria-busy="true">
-            {Array.from({ length: Math.min(summary?.serviceIds.length ?? 4, 8) }).map((_, i) => (
-              <div className="card skeleton" key={i} />
-            ))}
-          </div>
-        )}
-
-        {garage && toWebsite && (
-          <>
-            <div className="website-cta">
-              <div>
-                <h3>{name} publishes its own prices</h3>
-                <p className="muted">Open their website for up-to-date pricing and booking.</p>
-              </div>
-              <a className="btn btn-primary btn-lg" href={garage.website} target="_blank" rel="noopener noreferrer">
-                Visit their website <FaExternalLinkAlt />
-              </a>
-            </div>
-            <ul className="tags big" aria-label="Services offered">
-              {garage.services.map((s) => (
-                <li key={s.id}>
-                  {iconFor(s.id)} {s.name}
-                  {s.duration && <small> &middot; {s.duration}</small>}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-
-        {garage && !toWebsite && (
-          <>
-            <div className="cards">
-              {garage.services.map((s) => (
-                <article className="card" key={s.id}>
-                  {s.badge && <span className="badge">{s.badge}</span>}
-                  <span className="card-icon">{iconFor(s.id)}</span>
-                  <h3>{s.name}</h3>
-                  <p>{s.description}</p>
-                  <div className="card-foot">
-                    <div className="price">
-                      <small>from</small> ${s.price}
-                    </div>
-                    {s.duration && (
-                      <div className="duration">
-                        <FaClock /> {s.duration}
-                      </div>
-                    )}
-                  </div>
-                </article>
-              ))}
-            </div>
-            <p className="booking-note">
-              <FaPhoneAlt />
-              <span>
-                Prefer to talk? Call {garage.name} on <a href={tel}>{garage.phone}</a> or drop in during opening hours.
-                Prices are starting prices for a standard passenger vehicle.
-              </span>
-            </p>
-          </>
-        )}
-
-        {garage &&
-          (garage.mine ? (
-            <p className="own-note">This is your own garage. Drivers see this page and can book from here.</p>
-          ) : (
-            <BookingForm garage={garage} onBooked={onBooked} onSessionExpired={onSessionExpired} />
-          ))}
       </div>
     </section>
   );

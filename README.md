@@ -14,8 +14,8 @@ profile); driver accounts only see the directory and *My bookings*. The server e
 book, driver accounts can't manage a garage. Accounts created before roles existed still work for both logins.
 
 **Drivers**
-1. Browse the public list of garages, search by name/area/city and filter by service.
-2. Sign up or log in to open a garage and see its services and prices.
+1. Browse the garages near their ZIP code, search by name/area/city and filter by service.
+2. Choosing a garage opens that garage's own page (`/g/{id}`). Signing in as a driver there shows its prices and lets them book.
 3. If a garage prefers to publish prices on its own site, the driver sees its services and a "Visit their website" button.
 
 **Garage owners**
@@ -28,7 +28,7 @@ book, driver accounts can't manage a garage. Accounts created before roles exist
 
 Each account can only read and edit its own garage profile.
 
-**Location.** Drivers enter a ZIP code and a range (my ZIP / around my ZIP / my wider area) and only garages in that
+**Location.** On a first visit the browser asks to share the visitor's location; if they allow it, the ZIP code is filled in automatically (coordinates are turned into a ZIP by OpenStreetMap's Nominatim service, called from the browser, US only). If they decline, or on any failure, they type their ZIP instead. A *Use my location* button retries. Drivers enter a ZIP code and a range (my ZIP / around my ZIP / my wider area) and only garages in that
 area are listed, nearest first. The choice is remembered in the browser. Matching is by ZIP prefix (same ZIP, same
 first 4 digits, same first 3 digits), so it is an approximation of distance, not exact miles. Garages saved before ZIP
 existed get one from their address if it contains one; otherwise the owner is asked to add it.
