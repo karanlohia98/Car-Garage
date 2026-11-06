@@ -2,6 +2,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { FaCar, FaClock, FaMapMarkerAlt, FaPaperPlane, FaPhoneAlt } from 'react-icons/fa';
 import * as api from './api';
 import type { ApptDetail, ApptStatus, ApptSummary, GarageDetail } from './api';
+import { money } from './config';
 
 /** The happy path, in order. requested / declined / cancelled sit outside it. */
 const STEPS: { status: ApptStatus; label: string }[] = [
@@ -183,8 +184,8 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
                   )}
                 </td>
                 <td>{editable ? <input aria-label="Quantity" inputMode="numeric" value={w.qty} onChange={(e) => setLine(i, { qty: Number(e.target.value.replace(/\D/g, '').slice(0, 2)) })} /> : w.qty}</td>
-                <td>{editable ? <input aria-label="Price each" inputMode="numeric" value={w.unit} onChange={(e) => setLine(i, { unit: Number(e.target.value.replace(/\D/g, '').slice(0, 5)) })} /> : `$${w.unit}`}</td>
-                <td>${(Number(w.qty) || 0) * (Number(w.unit) || 0)}</td>
+                <td>{editable ? <input aria-label="Price each" inputMode="numeric" value={w.unit} onChange={(e) => setLine(i, { unit: Number(e.target.value.replace(/\D/g, '').slice(0, 6)) })} /> : money(w.unit)}</td>
+                <td>{money((Number(w.qty) || 0) * (Number(w.unit) || 0))}</td>
                 {editable && (
                   <td>
                     <button type="button" className="icon-btn" aria-label="Remove line" onClick={() => { setSaved(false); setWork(work.filter((_, k) => k !== i)); }}>
@@ -204,16 +205,16 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       )}
 
       <div className="job-totals">
-        <span>Booked services <b>${c.bookedTotal}</b></span>
-        <span>Extra work <b>${editable ? extra : c.extraTotal}</b></span>
-        <span className="grand">Total <b>${c.bookedTotal + (editable ? extra : c.extraTotal)}</b></span>
+        <span>Booked services <b>{money(c.bookedTotal)}</b></span>
+        <span>Extra work <b>{money(editable ? extra : c.extraTotal)}</b></span>
+        <span className="grand">Total <b>{money(c.bookedTotal + (editable ? extra : c.extraTotal))}</b></span>
       </div>
 
       {c.work.length > 0 && (
         <div className={`estimate est-${est}`}>
           {est === 'none' && <span>Extra work not yet sent for approval.</span>}
-          {est === 'sent' && <span>Extra work of ${c.estimateTotal} is waiting for the customer&apos;s approval.</span>}
-          {est === 'approved' && <span>Customer approved the extra work (${c.estimateTotal}).</span>}
+          {est === 'sent' && <span>Extra work of {money(c.estimateTotal)} is waiting for the customer&apos;s approval.</span>}
+          {est === 'approved' && <span>Customer approved the extra work ({money(c.estimateTotal)}).</span>}
           {est === 'declined' && <span>Customer declined the extra work. Talk to them before going ahead.</span>}
           {d.role === 'customer' && est === 'sent' && (
             <span className="action-row no-print">
@@ -261,7 +262,7 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
   const label = (m: string) => api.PAY_LABELS[m as api.PayMethod] ?? m;
   return (
     <div className="pay-box" aria-label="Payment">
-      <h4>Payment {d.total > 0 && <small>(estimated total: from ${d.total})</small>}</h4>
+      <h4>Payment {d.total > 0 && <small>(estimated total: from {money(d.total)})</small>}</h4>
       {d.payStatus === 'paid' ? (
         <p className="pay-done">Paid{d.payMethod ? ` by ${label(d.payMethod).toLowerCase()}` : ''}. Thank you!</p>
       ) : isGarage ? (
@@ -513,10 +514,10 @@ export function AppointmentPanel(props: {
           {d.services.map((s) => (
             <span className="fact-line" key={s.name}>
               {s.name}
-              {s.price > 0 && <b> from ${s.price}</b>}
+              {s.price > 0 && <b> from {money(s.price)}</b>}
             </span>
           ))}
-          {d.total > 0 && <span className="fact-line total">Estimated total: from ${d.total}</span>}
+          {d.total > 0 && <span className="fact-line total">Estimated total: from {money(d.total)}</span>}
         </dd>
         {d.notes && (
           <>
@@ -552,7 +553,7 @@ export function AppointmentPanel(props: {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={200}
-                placeholder="e.g. Front pads are worn, +$90. OK to go ahead?"
+                placeholder="e.g. Front pads are worn, +{money(900)}. OK to go ahead?"
               />
             </label>
           )}
@@ -831,7 +832,7 @@ export function BookingForm(props: {
                 {s.name}
                 {garage.mode === 'listing' && s.price > 0 && (
                   <b>
-                    {' '}from ${s.finalPrice}
+                    {' '}from {money(s.finalPrice)}
                     {s.discount > 0 && <> ({s.discount}% off)</>}
                   </b>
                 )}

@@ -13,6 +13,7 @@ import type { CatalogItem, GarageInput, OwnerGarage, PayInfo, PayMethod, Pricing
 import { AppointmentsWorkspace } from './Appointments';
 import { fullAddress, iconFor, isCustomService, isHttpUrl } from './shared';
 import { themeVars } from './SitePage';
+import { cfg, money, postalRe, postalExample } from './config';
 
 interface ServiceRow {
   key: string;
@@ -117,9 +118,9 @@ const parseHours = (h: string): { days: string; open: string; close: string } | 
 const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Payments', 'Your page', 'Review & publish'] as const;
 
 /** One-sentence explanation shown under each step heading. */
-const STEP_HELP = [
+const stepHelp = (): string[] => [
   'This is how your garage is named in the directory. Customers see your name first, so use the name on your sign.',
-  'Drivers search by ZIP code, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.',
+  `Drivers search by ${cfg.postalLabel}, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.`,
   'Pick one. You can switch later. Customers must be signed in to see prices either way.',
   'Choose what you offer. Each service starts with a ready-made description and typical time that you can reword. Add a percentage off to promote a service.',
   'Customers pay you directly. Tick how you accept payment; we track it so both sides know when a job is paid.',
@@ -134,7 +135,7 @@ function validateStep(step: number, a: Answers): string | null {
       return a.name.trim().length < 2 ? 'Please enter your garage name.' : null;
     case 1:
       if (a.city.trim().length < 2) return 'Please enter your city.';
-      if (!/^\d{5}$/.test(a.zip.trim())) return 'Please enter your 5-digit ZIP code. Drivers find you by ZIP.';
+      if (!postalRe().test(a.zip.trim())) return `Please enter your ${cfg.postalLength}-digit ${cfg.postalLabel}. Drivers find you by it.`;
       if (a.address.trim().length < 5) return 'Please enter your street address.';
       if (a.phone.replace(/\D/g, '').length < 7) return 'Please enter a valid phone number.';
       if (a.hours.trim().length < 2) return 'Please tell customers your opening hours.';
@@ -154,8 +155,8 @@ function validateStep(step: number, a: Answers): string | null {
           if (s.discount.trim() !== '' && (!Number.isInteger(Number(s.discount)) || Number(s.discount) < 1 || Number(s.discount) > 90)) {
             return `Discount for ${s.name || 'a service'} must be 1 to 90 percent, or empty.`;
           }
-          if (s.price.trim() === '' || !Number.isInteger(p) || p < 1 || p > 10000) {
-            return `Enter a whole-dollar price (1-10000) for ${s.id ? 'each catalog service' : s.name || 'each custom service'}.`;
+          if (s.price.trim() === '' || !Number.isInteger(p) || p < 1 || p > cfg.maxPrice) {
+            return `Enter a whole-number price (1-${cfg.maxPrice}) for ${s.id ? 'each catalog service' : s.name || 'each custom service'}.`;
           }
         }
       }
@@ -282,7 +283,7 @@ function ApprovalStatus(props: { garage: OwnerGarage; onTogglePublish: () => voi
   if (!garage.zip) {
     return (
       <div className="status draft" role="status">
-        Add your ZIP code so drivers nearby can find you. Choose <b>Edit my answers</b>, then <b>Where &amp; when</b>.
+        Add your {cfg.postalLabel} so drivers nearby can find you. Choose <b>Edit my answers</b>, then <b>Where &amp; when</b>.
       </div>
     );
   }
@@ -366,7 +367,7 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
         {garage.services.map((s) => (
           <li key={s.id}>
             {iconFor(s.id)} {s.name}
-            {garage.mode === 'listing' && <b> ${s.finalPrice}{s.discount > 0 && ` (${s.discount}% off)`}</b>}
+            {garage.mode === 'listing' && <b> {money(s.finalPrice)}{s.discount > 0 && ` (${s.discount}% off)`}</b>}
           </li>
         ))}
       </ul>
@@ -465,7 +466,7 @@ function Wizard(props: {
 
       <div className="wizard-card">
         <h3>{STEPS[step]}</h3>
-        <p className="step-help">{STEP_HELP[step]}</p>
+        <p className="step-help">{stepHelp()[step]}</p>
 
         {step === 0 && (
           <div className="qa">
@@ -495,16 +496,16 @@ function Wizard(props: {
                 <input value={a.city} onChange={(e) => set('city', e.target.value)} maxLength={60} autoFocus placeholder="e.g. Seattle" />
               </label>
               <label>
-                ZIP code
+                {cfg.postalLabel}
                 <input
                   value={a.zip}
-                  onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, cfg.postalLength))}
                   inputMode="numeric"
-                  maxLength={5}
-                  placeholder="e.g. 98108"
+                  maxLength={cfg.postalLength}
+                  placeholder={`e.g. ${postalExample()}`}
                   autoComplete="postal-code"
                 />
-                <small className="hint">Drivers within your area see you when they search this ZIP.</small>
+                <small className="hint">Drivers within your area see you when they search this {cfg.postalLabel}.</small>
               </label>
             </div>
             <div className="two">
@@ -519,7 +520,7 @@ function Wizard(props: {
             </div>
             <label>
               Phone number
-              <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" placeholder="e.g. (206) 555-0142" autoComplete="tel" />
+              <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" placeholder={cfg.country === 'US' ? 'e.g. (206) 555-0142' : 'e.g. +91 98250 12345'} autoComplete="tel" />
               <small className="hint">Customers call this number about their booking.</small>
             </label>
             <fieldset className="hours">
@@ -631,7 +632,7 @@ function Wizard(props: {
                     {a.mode === 'listing' && (
                       <>
                         <label className="money">
-                          <span>$</span>
+                          <span>{cfg.currency}</span>
                           <input
                             inputMode="numeric"
                             value={s.price}
@@ -729,7 +730,7 @@ function Wizard(props: {
                 value={a.pay.note}
                 onChange={(e) => set('pay', { ...a.pay, note: e.target.value })}
                 maxLength={100}
-                placeholder="e.g. Zelle: 206 555 0142"
+                placeholder={cfg.country === 'US' ? 'e.g. Zelle: 206 555 0142' : 'e.g. UPI: garage@upi'}
               />
               <small className="hint">Shown to the customer when they pay, for example transfer details.</small>
             </label>
@@ -823,13 +824,13 @@ function Wizard(props: {
               <dt>Services</dt>
               <dd>
                 {a.services
-                  .map((s) => `${s.name}${a.mode === 'listing' ? ` ($${s.price}${s.discount ? `, ${s.discount}% off` : ''})` : ''}`)
+                  .map((s) => `${s.name}${a.mode === 'listing' ? ` (${money(Number(s.price))}${s.discount ? `, ${s.discount}% off` : ''})` : ''}`)
                   .join(', ')}
               </dd>
             </dl>
             <p className="muted">
               {isNew || !wasPublished
-                ? 'After you publish, our team checks your garage. Once approved, it appears for drivers in your ZIP area. You can edit it any time.'
+                ? 'After you publish, our team checks your garage. Once approved, it appears for drivers in your area. You can edit it any time.'
                 : 'You are live. Changes are saved straight away.'}
             </p>
           </div>

@@ -35,6 +35,7 @@ public final class Main {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
         Path dist = Path.of(System.getenv().getOrDefault("STATIC_DIR", "../frontend/dist")).toAbsolutePath().normalize();
         Path dataFile = Path.of(System.getenv().getOrDefault("DATA_FILE", "data/users.tsv"));
+        GarageStore.country = System.getenv().getOrDefault("COUNTRY", "IN").toUpperCase();
         UserStore store = new UserStore(dataFile);
         Path garagesFile = Path.of(System.getenv().getOrDefault("GARAGES_FILE", "data/garages.json"));
         boolean seedSamples = !"false".equalsIgnoreCase(System.getenv("SEED_SAMPLES"));
@@ -53,6 +54,7 @@ public final class Main {
         server.createContext("/api/login", ex -> handle(ex, () -> login(ex, store, garageStore)));
         server.createContext("/api/me", ex -> handle(ex, () -> me(ex, store, garageStore)));
         server.createContext("/api/logout", ex -> handle(ex, () -> logout(ex, store)));
+        server.createContext("/api/config", ex -> handle(ex, () -> { if (method(ex, "GET")) send(ex, 200, Json.write(GarageStore.config())); }));
         server.createContext("/api/catalog", ex -> handle(ex, () -> catalog(ex)));
         server.createContext("/api/garages", ex -> handle(ex, () -> garages(ex, store, garageStore)));
         server.createContext("/api/my/garage", ex -> handle(ex, () -> myGarage(ex, store, garageStore)));

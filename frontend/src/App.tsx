@@ -12,6 +12,7 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
+import { cfg, postalExample, postalRe } from './config';
 import type { GarageDetail, GarageSummary, Range, User, Where } from './api';
 import { AppointmentsWorkspace, BookingForm } from './Appointments';
 import GarageDashboard from './GarageDashboard';
@@ -33,7 +34,7 @@ const WHERE_KEY = 'garage.where';
 const loadWhere = (): Where | null => {
   try {
     const w = JSON.parse(localStorage.getItem(WHERE_KEY) ?? 'null') as Where | null;
-    return w && /^\d{5}$/.test(w.zip) && ['exact', 'near', 'wide'].includes(w.range) ? w : null;
+    return w && postalRe().test(w.zip) && ['exact', 'near', 'wide'].includes(w.range) ? w : null;
   } catch {
     return null;
   }
@@ -491,13 +492,13 @@ function detectZip(): Promise<string> {
             { headers: { Accept: 'application/json' } },
           );
           const data = (await r.json()) as { address?: { postcode?: string; country_code?: string } };
-          const zip = /\b\d{5}\b/.exec(data.address?.postcode ?? '')?.[0];
-          if (!zip || (data.address?.country_code && data.address.country_code !== 'us')) {
-            return reject(new Error('We could only find a ZIP code for locations in the US.'));
+          const zip = new RegExp(`\\b\\d{${cfg.postalLength}}\\b`).exec((data.address?.postcode ?? '').replace(/\s/g, ' ').replace(/(\d{3}) (\d{3})/, '$1$2'))?.[0];
+          if (!zip || (data.address?.country_code && data.address.country_code !== cfg.country.toLowerCase())) {
+            return reject(new Error(`We could only find a ${cfg.postalLabel} for locations in ${cfg.country === 'US' ? 'the US' : 'India'}.`));
           }
           resolve(zip);
         } catch {
-          reject(new Error('Could not work out your ZIP code from your location.'));
+          reject(new Error(`Could not work out your ${cfg.postalLabel} from your location.`));
         }
       },
       (err) =>
@@ -532,7 +533,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
         onWhere({ zip: found, range });
       } catch (e) {
         // Automatic attempts fail quietly into manual entry; a button press explains what went wrong.
-        setNote(`${e instanceof Error ? e.message : 'Could not detect your location.'} Please enter your ZIP code.`);
+        setNote(`${e instanceof Error ? e.message : 'Could not detect your location.'} Please enter your ${cfg.postalLabel}.`);
         if (auto) document.getElementById('zip-input')?.focus();
       } finally {
         setDetecting(false);
@@ -550,7 +551,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!/^\d{5}$/.test(zip)) return setError('Enter a 5-digit ZIP code.');
+    if (!postalRe().test(zip)) return setError(`Enter a ${cfg.postalLength}-digit ${cfg.postalLabel}.`);
     setError(null);
     onWhere({ zip, range });
   };
@@ -558,17 +559,17 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
   return (
     <form className="location-bar" onSubmit={submit} noValidate>
       <label>
-        Your ZIP code
+        Your {cfg.postalLabel}
         <span className="loc-input">
           <FaMapMarkerAlt aria-hidden="true" />
           <input
             value={zip}
-            onChange={(e) => setZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+            onChange={(e) => setZip(e.target.value.replace(/\D/g, '').slice(0, cfg.postalLength))}
             inputMode="numeric"
             autoComplete="postal-code"
-            maxLength={5}
-            placeholder="e.g. 98108"
-            aria-label="Your ZIP code"
+            maxLength={cfg.postalLength}
+            placeholder={`e.g. ${postalExample()}`}
+            aria-label={`Your ${cfg.postalLabel}`}
             id="zip-input"
           />
         </span>
@@ -576,8 +577,8 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
       <label>
         How far?
         <select value={range} onChange={(e) => setRange(e.target.value as Range)} aria-label="How far to search">
-          <option value="exact">Only my ZIP code</option>
-          <option value="near">Around my ZIP code</option>
+          <option value="exact">Only my {cfg.postalLabel}</option>
+          <option value="near">Around my {cfg.postalLabel}</option>
           <option value="wide">My wider area</option>
         </select>
       </label>
@@ -637,7 +638,7 @@ function GaragesSection(props: {
           <p className="eyebrow">Garages near you</p>
           <h2>Choose a garage</h2>
           <p className="muted">
-            Enter your ZIP code to see garages in your area.{' '}
+            Enter your {cfg.postalLabel} to see garages in your area.{' '}
             {user ? 'Pick one to see its services and pricing.' : 'Sign in to see their services and pricing.'}
           </p>
         </div>
@@ -646,7 +647,7 @@ function GaragesSection(props: {
 
         {!where && (
           <p className="muted empty">
-            Type your ZIP code above and we&apos;ll show only the garages around you.
+            Type your {cfg.postalLabel} above and we&apos;ll show only the garages around you.
           </p>
         )}
 
@@ -747,7 +748,7 @@ function GaragesSection(props: {
 
 function Process() {
   const steps = [
-    { n: '1', t: 'Enter your ZIP', d: 'Share your location or type your ZIP code to see garages near you.' },
+    { n: '1', t: `Enter your ${cfg.postalLabel}`, d: `Share your location or type your ${cfg.postalLabel} to see garages near you.` },
     { n: '2', t: 'Choose a garage', d: 'Open its page, read its services and reviews, then sign in to see prices.' },
     { n: '3', t: 'Book and chat', d: 'Pick a time, then follow the job and message the garage as it goes.' },
     { n: '4', t: 'Collect, pay, review', d: 'Pick up your car, pay the garage, and rate your experience.' },
@@ -785,9 +786,9 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
   ];
   const steps = [
     ['Register', 'Create a garage owner account.'],
-    ['Answer a few questions', 'Name, ZIP code, hours, services, prices and how you want your page to look.'],
+    ['Answer a few questions', `Name, ${cfg.postalLabel}, hours, services, prices and how you want your page to look.`],
     ['We approve it', 'Our team checks new garages, usually within a day.'],
-    ['Go live', 'Drivers near your ZIP can find you and book.'],
+    ['Go live', `Drivers near your ${cfg.postalLabel} can find you and book.`],
   ];
   return (
     <>

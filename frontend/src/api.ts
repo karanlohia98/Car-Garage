@@ -51,10 +51,11 @@ export interface SiteData extends GarageSummary {
   live: boolean;
 }
 
-export type PayMethod = 'cash' | 'card' | 'transfer' | 'online';
+export type PayMethod = 'cash' | 'card' | 'upi' | 'transfer' | 'online';
 export const PAY_LABELS: Record<PayMethod, string> = {
   cash: 'Cash',
   card: 'Card at the garage',
+  upi: 'UPI',
   transfer: 'Bank transfer',
   online: 'Online payment link',
 };

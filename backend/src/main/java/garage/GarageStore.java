@@ -54,7 +54,7 @@ final class GarageStore {
     static final Map<String, String> DEFAULT_THEME = Map.of("accent", "#ff6a1a", "mode", "dark", "font", "modern", "headline", "", "about", "");
     /** How the garage accepts payment. "online" uses the garage's own payment link (e.g. a Stripe or PayPal link). */
     static final Map<String, Object> DEFAULT_PAY = Map.of("methods", List.of("card", "cash"), "link", "", "note", "");
-    private static final List<String> PAY_METHODS = List.of("cash", "card", "transfer", "online");
+    private static final List<String> PAY_METHODS = List.of("cash", "card", "upi", "transfer", "online");
 
     static Map<String, Object> parsePay(Object raw, Map<String, Object> fallback) {
         if (!(raw instanceof Map<?, ?> m)) return fallback;
@@ -100,11 +100,24 @@ final class GarageStore {
 
     private static final int MAX_SERVICES = 20;
     private static final Pattern PHONE = Pattern.compile("^[0-9+()\\-.\\s]{7,25}$");
-    static final Pattern ZIP = Pattern.compile("^\\d{5}$");
-    private static final Pattern ZIP_IN_TEXT = Pattern.compile("\\b(\\d{5})(?:-\\d{4})?\\b");
+    static final Pattern ZIP = Pattern.compile("^(\\d{6}|\\d{5})$"); // India PIN (6 digits) or US ZIP (5 digits)
+    private static final Pattern ZIP_IN_TEXT = Pattern.compile("\\b(\\d{6}|\\d{5})\\b");
 
     /** Nearness levels for a ZIP search: same ZIP, same first 4 digits, same first 3 digits (USPS sectional centre). */
-    private static final String[] NEARNESS = {"Same ZIP code", "Nearby", "Same wider area"};
+    private static String[] nearness() {
+        return new String[] {"Same " + (country.equals("US") ? "ZIP" : "PIN") + " code", "Nearby", "Same wider area"};
+    }
+
+    /** Country settings. COUNTRY=IN (default) or US: currency symbol, postal-code wording, number format, price ceiling. */
+    static String country = "IN";
+
+    static Map<String, Object> config() {
+        boolean us = country.equals("US");
+        return Json.obj("country", country, "currency", us ? "$" : "₹", "postalLabel", us ? "ZIP code" : "PIN code",
+                "postalLength", us ? 5 : 6, "locale", us ? "en-US" : "en-IN", "maxPrice", MAX_PRICE);
+    }
+
+    static final int MAX_PRICE = 200_000;
 
     /** ZIP for records saved before ZIP existed: take it from the address if one is written there, else empty. */
     static String zipFromAddress(String address) {
@@ -170,10 +183,10 @@ final class GarageStore {
             int level = -1;
             if (byZip) {
                 String gz = g.zip();
-                if (gz.length() == 5) {
-                    if (gz.equals(zip)) level = 0;
-                    else if (gz.startsWith(zip.substring(0, 4))) level = 1;
-                    else if (gz.startsWith(zip.substring(0, 3))) level = 2;
+                // Prefix lengths for same code / nearby / wider area. US ZIP: 5,4,3. India PIN: 6,5,3 (3 digits = sorting district, roughly a city).
+                int[] prefix = zip.length() == 6 ? new int[] {6, 5, 3} : new int[] {5, 4, 3};
+                if (gz.length() == zip.length()) {
+                    for (int i = 0; i < 3 && level < 0; i++) if (gz.startsWith(zip.substring(0, prefix[i]))) level = i;
                 }
             } else if (!c.isEmpty() && (g.city().toLowerCase(Locale.ROOT).contains(c) || g.area().toLowerCase(Locale.ROOT).contains(c))) {
                 level = 0;
@@ -186,7 +199,7 @@ final class GarageStore {
         List<Object> out = new ArrayList<>();
         for (Hit h : hits) {
             Map<String, Object> m = summary(h.g());
-            m.put("nearness", byZip ? NEARNESS[h.level()] : "Matches your area");
+            m.put("nearness", byZip ? nearness()[h.level()] : "Matches your area");
             out.add(m);
         }
         return out;
@@ -230,8 +243,8 @@ final class GarageStore {
         String name = str(b, "name", "Garage name", 2, 80, true);
         String city = str(b, "city", "City", 2, 60, true);
         String area = str(b, "area", "Neighbourhood", 0, 60, false);
-        String zip = str(b, "zip", "ZIP code", 5, 5, true);
-        if (!ZIP.matcher(zip).matches()) throw new Invalid("ZIP code must be 5 digits.");
+        String zip = str(b, "zip", country.equals("US") ? "ZIP code" : "PIN code", 5, 6, true);
+        if (!ZIP.matcher(zip).matches() || zip.length() != (country.equals("US") ? 5 : 6)) throw new Invalid((country.equals("US") ? "ZIP code" : "PIN code") + " must be " + (country.equals("US") ? "5" : "6") + " digits.");
         String address = str(b, "address", "Street address", 5, 140, true);
         String phone = str(b, "phone", "Phone number", 7, 25, true);
         if (!PHONE.matcher(phone).matches() || phone.chars().filter(Character::isDigit).count() < 7) {
@@ -367,8 +380,8 @@ final class GarageStore {
             int price = 0;
             if (mode.equals(MODE_LISTING)) {
                 double p = s.get("price") instanceof Number n ? n.doubleValue() : -1;
-                if (!(p >= 1 && p <= 10000) || p != Math.rint(p)) {
-                    throw new Invalid("Enter a whole-dollar price between 1 and 10000 for " + name + ".");
+                if (!(p >= 1 && p <= MAX_PRICE) || p != Math.rint(p)) {
+                    throw new Invalid("Enter a whole-number price between 1 and " + MAX_PRICE + " for " + name + ".");
                 }
                 price = (int) p;
             }
@@ -539,6 +552,41 @@ final class GarageStore {
     }
 
     private static List<Garage> samples() {
+        return country.equals("US") ? samplesUs() : samplesIn();
+    }
+
+    /** Made-up Ahmedabad garages for a fresh install. Names, phone numbers, ratings and prices are invented. */
+    private static List<Garage> samplesIn() {
+        return List.of(
+                new Garage("sample-navrang", "", "Navrang Auto Works", "Ahmedabad", "Navrangpura", "380009", "12 Sample Road, Navrangpura, Ahmedabad 380009",
+                        "+91 79 4000 0101", "Mon-Sat, 9:00 AM - 7:00 PM", "All-round car service with a 6-month workmanship warranty.",
+                        MODE_LISTING, "", true, 4.8, 212,
+                        List.of(svc("oil", 1499, "45 min", "Most popular"), svc("brakes", 3499, "1.5 hrs"), svc("tires", 599, "45 min"),
+                                svc("battery", 5499, "30 min"), svc("ac", 2499, "1 hr"), svc("engine", 999, "1 hr"),
+                                svc("align", 899, "1 hr"), svc("full", 5999, "3 hrs", "Best value"))),
+                new Garage("sample-satellite", "", "Satellite Motor Care", "Ahmedabad", "Satellite", "380015", "34 Demo Society, Satellite, Ahmedabad 380015",
+                        "+91 79 4000 0102", "Mon-Sat, 8:30 AM - 6:30 PM", "Diagnostics and engine specialists for hatchbacks and SUVs.",
+                        MODE_LISTING, "", true, 4.6, 148,
+                        List.of(svc("engine", 799, "1 hr", "Specialty"), svc("oil", 1399, "40 min"), svc("brakes", 3199, "1.5 hrs"),
+                                svc("inspection", 1499, "2 hrs"), svc("battery", 5299, "30 min"), svc("full", 5499, "3 hrs"))),
+                new Garage("sample-maninagar", "", "Maninagar Tyre & Brake", "Ahmedabad", "Maninagar", "380008", "7 Example Chowk, Maninagar, Ahmedabad 380008",
+                        "+91 79 4000 0103", "Mon-Sat, 9:00 AM - 6:00 PM", "Tyres, brakes and alignment, often done while you wait.",
+                        MODE_LISTING, "", true, 4.5, 96,
+                        List.of(svc("tires", 499, "30 min", "Most popular"), svc("brakes", 2999, "1.25 hrs"), svc("align", 799, "1 hr"),
+                                svc("battery", 4999, "25 min"))),
+                new Garage("sample-bopal", "", "Bopal EV & Hybrid Garage", "Ahmedabad", "Bopal", "380058", "21 Test Avenue, Bopal, Ahmedabad 380058",
+                        "+91 79 4000 0104", "Mon-Sat, 10:00 AM - 7:00 PM", "EV and hybrid health checks plus regular servicing.",
+                        MODE_LISTING, "", true, 4.7, 73,
+                        List.of(svc("ev", 1999, "1.5 hrs", "EV specialist"), svc("oil", 1599, "45 min"), svc("tires", 649, "40 min"),
+                                svc("ac", 2699, "1 hr"), svc("inspection", 1799, "2 hrs"), svc("full", 6499, "3 hrs"))),
+                new Garage("sample-chandkheda", "", "Chandkheda Quick Service", "Ahmedabad", "Chandkheda", "382424", "5 Placeholder Marg, Chandkheda, Ahmedabad 382424",
+                        "+91 79 4000 0105", "Daily, 8:00 AM - 8:00 PM", "Quick maintenance seven days a week.",
+                        MODE_LISTING, "", true, 4.4, 181,
+                        List.of(svc("oil", 1199, "30 min", "Fastest"), svc("tires", 449, "30 min"), svc("battery", 4799, "20 min"),
+                                svc("ac", 2299, "1 hr"), svc("engine", 699, "45 min"))));
+    }
+
+    private static List<Garage> samplesUs() {
         return List.of(
                 new Garage("redline", "", "Redline Auto Garage", "Seattle", "Georgetown", "98134", "1420 Industrial Way, Seattle, WA 98134",
                         "(206) 555-0142", "Mon-Fri 8am-6pm, Sat 9am-3pm", "All-round independent garage with a 12-month warranty.",

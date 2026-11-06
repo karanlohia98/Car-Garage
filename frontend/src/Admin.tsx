@@ -3,6 +3,7 @@ import { FaCheckCircle, FaMapMarkerAlt, FaPhoneAlt, FaTimesCircle } from 'react-
 import * as api from './api';
 import type { AdminGarage } from './api';
 import { fullAddress } from './shared';
+import { money } from './config';
 
 type Filter = 'pending' | 'approved' | 'rejected' | '';
 
@@ -156,7 +157,7 @@ function Card({ g, onDone, onExpired }: { g: AdminGarage; onDone: () => void; on
       {g.tagline && <p className="muted">{g.tagline}</p>}
       <ul className="detail-meta">
         <li>
-          <FaMapMarkerAlt /> {fullAddress(g)} {g.zip || '(no ZIP)'}
+          <FaMapMarkerAlt /> {fullAddress(g)} {g.zip || '(no PIN/ZIP)'}
         </li>
         <li>
           <FaPhoneAlt /> {g.phone} &middot; {g.hours}
@@ -170,7 +171,7 @@ function Card({ g, onDone, onExpired }: { g: AdminGarage; onDone: () => void; on
           {g.services.map((s) => (
             <li key={s.id}>
               {s.name}
-              {g.mode === 'listing' && <b> ${s.price}</b>}
+              {g.mode === 'listing' && <b> {money(s.price)}</b>}
             </li>
           ))}
         </ul>

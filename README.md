@@ -119,6 +119,12 @@ To put it online cheaply, see [HOSTING.md](HOSTING.md) (includes a `Dockerfile`)
 
 Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 
+## India / country settings
+
+`COUNTRY=IN` (default) uses 6-digit PIN codes, rupees (₹, Indian digit grouping) and UPI as a payment method; PIN search
+matches by prefix (same PIN, nearby, wider area). `COUNTRY=US` uses 5-digit ZIP codes and dollars. The frontend reads
+`/api/config`. Fresh installs seed Ahmedabad sample garages (invented) unless `SEED_SAMPLES=false`.
+
 ## API
 
 | Method | Path               | Auth                | Description |

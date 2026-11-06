@@ -4,6 +4,7 @@ import * as api from './api';
 import type { GarageDetail, SiteData } from './api';
 import { BookingForm } from './Appointments';
 import { Stars, iconFor, isHttpUrl } from './shared';
+import { money } from './config';
 
 const FONTS: Record<string, string> = {
   modern: "'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif",
@@ -112,7 +113,7 @@ export default function SitePage({ id }: { id: string }) {
                   {sv.duration && <span className="s-muted"><FaClock /> {sv.duration}</span>}
                   {!toWebsite && p && p.price > 0 && (
                     <b>
-                      {sv.discount > 0 && <s className="s-muted">${p.price}</s>} from ${p.finalPrice}
+                      {sv.discount > 0 && <s className="s-muted">{money(p.price)}</s>} from {money(p.finalPrice)}
                     </b>
                   )}
                 </div>

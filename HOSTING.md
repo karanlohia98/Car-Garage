@@ -49,6 +49,48 @@ docker run -p 8080:8080 -v garage-data:/data garage-hub
 The `-v garage-data:/data` volume is what keeps accounts and garages across restarts. On Fly.io create a volume and
 mount it at `/data`. The Dockerfile sets `HOST=0.0.0.0` and `SEED_SAMPLES=false` (no fake garages in production).
 
+## Option C: AWS Lightsail in Mumbai (recommended for Ahmedabad)
+
+Lightsail is AWS's simple VPS. Pick region **Asia Pacific (Mumbai) ap-south-1**. Plans checked Nov 2026: $5/mo (0.5 GB),
+**$7/mo (1 GB, 40 GB disk)**, $12/mo (2 GB); Mumbai plans include half the listed transfer. Use the 1 GB plan.
+
+1. Buy a domain and create a Lightsail Ubuntu LTS instance (Mumbai, 1 GB plan).
+2. Create a **static IP** and attach it. In Networking open ports 80 and 443 (restrict 22 to your IP).
+3. SSH in: `sudo apt update && sudo apt install -y openjdk-17-jdk-headless git curl`, then install Node 20 (NodeSource).
+4. `git clone https://github.com/karanlohia98/Car-Garage.git /opt/garagehub && cd /opt/garagehub`
+5. Build: `(cd frontend && npm install && npm run build)` and `(cd backend && mkdir -p out && javac -d out src/main/java/garage/*.java)`
+6. `sudo mkdir -p /var/lib/garagehub` and create `/etc/garagehub.env`:
+   ```
+   COUNTRY=IN
+   HOST=127.0.0.1
+   PORT=8080
+   STATIC_DIR=/opt/garagehub/frontend/dist
+   DATA_FILE=/var/lib/garagehub/users.tsv
+   GARAGES_FILE=/var/lib/garagehub/garages.json
+   APPOINTMENTS_FILE=/var/lib/garagehub/appointments.json
+   ADMIN_FILE=/var/lib/garagehub/admin.json
+   SEED_SAMPLES=false
+   ADMIN_USERNAME=choose-a-name
+   ADMIN_PASSWORD=choose-12+-random-characters
+   ```
+7. `/etc/systemd/system/garagehub.service`:
+   ```
+   [Unit]
+   Description=Garage Hub
+   After=network.target
+   [Service]
+   EnvironmentFile=/etc/garagehub.env
+   WorkingDirectory=/opt/garagehub/backend
+   ExecStart=/usr/bin/java -Xmx256m -cp out garage.Main
+   Restart=always
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Then `sudo systemctl enable --now garagehub`.
+8. Install Caddy (official apt repo) and set `/etc/caddy/Caddyfile` to `yourdomain.com { reverse_proxy 127.0.0.1:8080 }`; `sudo systemctl reload caddy`.
+9. Point the domain's **A record** at the static IP. HTTPS is issued automatically.
+10. Turn on Lightsail **automatic snapshots**; update later with `git pull`, rebuild, `sudo systemctl restart garagehub`.
+
 ## Before real users arrive
 
 - **Back up `/data`** (four small files) regularly. Appointments and chat history are in there.

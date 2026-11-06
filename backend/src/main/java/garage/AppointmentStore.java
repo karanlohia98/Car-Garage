@@ -326,7 +326,7 @@ final class AppointmentStore {
                 double qty = x.get("qty") instanceof Number n ? n.doubleValue() : 0;
                 double unit = x.get("unit") instanceof Number n ? n.doubleValue() : -1;
                 if (qty != Math.rint(qty) || qty < 1 || qty > 99) throw new GarageStore.Invalid("Quantity must be 1 to 99.");
-                if (unit != Math.rint(unit) || unit < 0 || unit > 10000) throw new GarageStore.Invalid("Price must be a whole number from 0 to 10000.");
+                if (unit != Math.rint(unit) || unit < 0 || unit > GarageStore.MAX_PRICE) throw new GarageStore.Invalid("Price must be a whole number from 0 to " + GarageStore.MAX_PRICE + ".");
                 c.work.add(new Work(kind, what, (int) qty, (int) unit));
             }
         }
@@ -390,12 +390,13 @@ final class AppointmentStore {
 
     // ---------- payment and reviews ----------
 
-    private static final List<String> PAY_LABEL_KEYS = List.of("cash", "card", "transfer", "online");
+    private static final List<String> PAY_LABEL_KEYS = List.of("cash", "card", "upi", "transfer", "online");
 
     private static String payLabel(String m) {
         return switch (m) {
             case "cash" -> "cash";
             case "card" -> "card at the garage";
+            case "upi" -> "UPI";
             case "transfer" -> "bank transfer";
             case "online" -> "online payment link";
             default -> m;
