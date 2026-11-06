@@ -79,6 +79,27 @@ final class AppointmentStore {
 
     private record Line(String name, int price) {}
 
+    /** Extra work found during the job: a part or labour, priced by the garage. */
+    private record Work(String kind, String text, int qty, int unit) {}
+
+    private record Check(String item, String state, String note) {}
+
+    /** The workshop's job card for one appointment: intake details, inspection, extra work and the estimate approval. */
+    private static final class Card {
+        int odometer;            // 0 = not recorded
+        String fuel = "";
+        String technician = "";
+        List<Check> checks = new ArrayList<>();
+        List<Work> work = new ArrayList<>();
+        String estimate = "none"; // none | sent | approved | declined
+        int estimateTotal;        // extra-work total at the moment it was sent
+        String updatedAt = "";
+    }
+
+    static final List<String> CHECK_ITEMS = List.of("Brakes", "Tires", "Lights", "Battery", "Fluids", "Wipers", "Suspension", "Engine bay");
+    private static final List<String> CHECK_STATES = List.of("ok", "attention", "notchecked");
+    private static final List<String> FUEL = List.of("Empty", "1/4", "1/2", "3/4", "Full");
+
     private record Msg(String from, String name, String text, String at) {} // from: customer | garage | system
 
     private static final class Appt {
@@ -104,6 +125,7 @@ final class AppointmentStore {
         int rating;                  // 0 = no review yet
         String reviewComment = "";
         String reviewAt = "";
+        Card card;                   // null until the garage opens the job card
     }
 
     private final Path file;
@@ -257,6 +279,115 @@ final class AppointmentStore {
         return detailJson(a, role, gs.find(a.garageId));
     }
 
+    // ---------- job card ----------
+
+    private static boolean cardOpen(String status) {
+        return status.equals(BOOKED) || status.equals(AT_GARAGE) || status.equals(IN_PROGRESS) || status.equals(COMPLETED);
+    }
+
+    /**
+     * Garage saves the job card. Body: {odometer, fuel, technician, checklist:[{item,state,note}], work:[{kind,text,qty,unit}]}.
+     * Changing the extra work after the customer approved it sends the estimate back to "none" so it must be approved again.
+     */
+    synchronized Map<String, Object> saveCard(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        if (!role.equals("garage")) throw new Denied("Only the garage fills in the job card.");
+        if (!cardOpen(a.status)) throw new Denied("The job card is locked once the car is picked up, or if the appointment was declined or cancelled.");
+
+        Card c = new Card();
+        double odo = b.get("odometer") instanceof Number n ? n.doubleValue() : 0;
+        if (odo != Math.rint(odo) || odo < 0 || odo > 2_000_000) throw new GarageStore.Invalid("Odometer must be a whole number up to 2,000,000.");
+        c.odometer = (int) odo;
+        c.fuel = b.get("fuel") instanceof String f ? f : "";
+        if (!c.fuel.isEmpty() && !FUEL.contains(c.fuel)) throw new GarageStore.Invalid("Choose a fuel level from the list.");
+        c.technician = text(b, "technician", "Technician", 0, 40, false, false);
+
+        if (b.get("checklist") instanceof List<?> l) {
+            if (l.size() > CHECK_ITEMS.size()) throw new GarageStore.Invalid("Too many inspection items.");
+            for (Object o : l) {
+                if (!(o instanceof Map<?, ?> m)) throw new GarageStore.Invalid("Invalid inspection list.");
+                @SuppressWarnings("unchecked") Map<String, Object> x = (Map<String, Object>) m;
+                String item = x.get("item") instanceof String i ? i : "";
+                String state = x.get("state") instanceof String st ? st : "";
+                if (!CHECK_ITEMS.contains(item) || !CHECK_STATES.contains(state)) throw new GarageStore.Invalid("Invalid inspection item.");
+                c.checks.add(new Check(item, state, text(x, "note", item + " note", 0, 80, false, false)));
+            }
+        }
+        if (b.get("work") instanceof List<?> l) {
+            if (l.size() > 30) throw new GarageStore.Invalid("At most 30 extra work lines.");
+            for (Object o : l) {
+                if (!(o instanceof Map<?, ?> m)) throw new GarageStore.Invalid("Invalid work list.");
+                @SuppressWarnings("unchecked") Map<String, Object> x = (Map<String, Object>) m;
+                String kind = x.get("kind") instanceof String k ? k : "";
+                if (!kind.equals("part") && !kind.equals("labour")) throw new GarageStore.Invalid("Each line is a part or labour.");
+                String what = text(x, "text", "Work description", 2, 60, true, false);
+                double qty = x.get("qty") instanceof Number n ? n.doubleValue() : 0;
+                double unit = x.get("unit") instanceof Number n ? n.doubleValue() : -1;
+                if (qty != Math.rint(qty) || qty < 1 || qty > 99) throw new GarageStore.Invalid("Quantity must be 1 to 99.");
+                if (unit != Math.rint(unit) || unit < 0 || unit > 10000) throw new GarageStore.Invalid("Price must be a whole number from 0 to 10000.");
+                c.work.add(new Work(kind, what, (int) qty, (int) unit));
+            }
+        }
+        Card old = a.card;
+        c.estimate = old == null ? "none" : old.estimate;
+        c.estimateTotal = old == null ? 0 : old.estimateTotal;
+        int newExtra = 0;
+        for (Work w : c.work) newExtra += w.qty() * w.unit();
+        if (!c.estimate.equals("none") && newExtra != c.estimateTotal) {
+            c.estimate = "none"; // changed after it was sent: must be sent again
+            addMessage(a, "system", "Extra work was changed, so the estimate needs to be sent for approval again.", role);
+        }
+        c.updatedAt = Instant.now().toString();
+        a.card = c;
+        a.updatedAt = c.updatedAt;
+        persist();
+        return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    /** Estimate approval for extra work. Garage: {action:"send"}. Customer: {action:"approve"|"decline"}. */
+    synchronized Map<String, Object> estimate(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
+        Appt a = appts.get(id);
+        if (a == null) throw new NotFound("Appointment not found.");
+        String role = roleOf(a, viewer, as, gs);
+        String action = b.get("action") instanceof String x ? x : "";
+        if (a.card == null || a.card.work.isEmpty()) throw new GarageStore.Invalid("There is no extra work to approve yet.");
+        if (!OPEN.contains(a.status)) throw new Denied("Estimates can only be handled while the job is open.");
+        int extra = extraTotal(a);
+        if (role.equals("garage")) {
+            if (!action.equals("send")) throw new Denied("Only the customer can approve or decline.");
+            a.card.estimate = "sent";
+            a.card.estimateTotal = extra;
+            addMessage(a, "system", "Estimate sent: $" + extra + " of extra work needs your approval.", role);
+        } else {
+            if (!a.card.estimate.equals("sent")) throw new Denied("There is no estimate waiting for you.");
+            if (action.equals("approve")) a.card.estimate = "approved";
+            else if (action.equals("decline")) a.card.estimate = "declined";
+            else throw new GarageStore.Invalid("Choose approve or decline.");
+            addMessage(a, "system", a.customerName + " " + (action.equals("approve") ? "approved" : "declined") + " the $" + a.card.estimateTotal + " estimate.", role);
+        }
+        a.updatedAt = Instant.now().toString();
+        persist();
+        return detailJson(a, role, gs.find(a.garageId));
+    }
+
+    private static Map<String, Object> cardJson(Appt a) {
+        Card c = a.card;
+        List<Object> checks = new ArrayList<>();
+        List<Object> work = new ArrayList<>();
+        if (c != null) {
+            for (Check k : c.checks) checks.add(Json.obj("item", k.item(), "state", k.state(), "note", k.note()));
+            for (Work w : c.work) work.add(Json.obj("kind", w.kind(), "text", w.text(), "qty", w.qty(), "unit", w.unit(), "total", w.qty() * w.unit()));
+        }
+        int booked = 0;
+        for (Line l : a.services) booked += l.price();
+        return Json.obj("odometer", c == null ? 0 : c.odometer, "fuel", c == null ? "" : c.fuel,
+                "technician", c == null ? "" : c.technician, "checklist", checks, "work", work,
+                "estimate", c == null ? "none" : c.estimate, "estimateTotal", c == null ? 0 : c.estimateTotal,
+                "extraTotal", extraTotal(a), "bookedTotal", booked, "exists", c != null);
+    }
+
     // ---------- payment and reviews ----------
 
     private static final List<String> PAY_LABEL_KEYS = List.of("cash", "card", "transfer", "online");
@@ -387,6 +518,12 @@ final class AppointmentStore {
     private static int total(Appt a) {
         int t = 0;
         for (Line l : a.services) t += l.price();
+        return t + extraTotal(a);
+    }
+
+    private static int extraTotal(Appt a) {
+        int t = 0;
+        if (a.card != null) for (Work w : a.card.work) t += w.qty() * w.unit();
         return t;
     }
 
@@ -423,10 +560,40 @@ final class AppointmentStore {
                 "canPay", finished && !a.payStatus.equals("paid"),
                 "canReview", finished && role.equals("customer") && a.rating == 0,
                 "review", a.rating == 0 ? null : Json.obj("rating", a.rating, "comment", a.reviewComment, "at", a.reviewAt),
-                "garagePay", g == null ? null : g.pay());
+                "garagePay", g == null ? null : g.pay(),
+                "card", cardJson(a), "cardItems", CHECK_ITEMS, "canEditCard", role.equals("garage") && cardOpen(a.status));
     }
 
     // ---------- persistence ----------
+
+    private static Map<String, Object> cardStore(Card c) {
+        List<Object> checks = new ArrayList<>();
+        List<Object> work = new ArrayList<>();
+        for (Check k : c.checks) checks.add(Json.obj("item", k.item(), "state", k.state(), "note", k.note()));
+        for (Work w : c.work) work.add(Json.obj("kind", w.kind(), "text", w.text(), "qty", w.qty(), "unit", w.unit()));
+        return Json.obj("odometer", c.odometer, "fuel", c.fuel, "technician", c.technician, "checks", checks, "work", work,
+                "estimate", c.estimate, "estimateTotal", c.estimateTotal, "updatedAt", c.updatedAt);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Card cardLoad(Map<String, Object> m) {
+        Card c = new Card();
+        c.odometer = ((Number) m.getOrDefault("odometer", 0)).intValue();
+        c.fuel = (String) m.getOrDefault("fuel", "");
+        c.technician = (String) m.getOrDefault("technician", "");
+        for (Object o : (List<Object>) m.getOrDefault("checks", List.of())) {
+            Map<String, Object> x = (Map<String, Object>) o;
+            c.checks.add(new Check((String) x.get("item"), (String) x.get("state"), (String) x.getOrDefault("note", "")));
+        }
+        for (Object o : (List<Object>) m.getOrDefault("work", List.of())) {
+            Map<String, Object> x = (Map<String, Object>) o;
+            c.work.add(new Work((String) x.get("kind"), (String) x.get("text"), ((Number) x.get("qty")).intValue(), ((Number) x.get("unit")).intValue()));
+        }
+        c.estimate = (String) m.getOrDefault("estimate", "none");
+        c.estimateTotal = ((Number) m.getOrDefault("estimateTotal", 0)).intValue();
+        c.updatedAt = (String) m.getOrDefault("updatedAt", "");
+        return c;
+    }
 
     private void persist() throws IOException {
         List<Object> all = new ArrayList<>();
@@ -441,7 +608,7 @@ final class AppointmentStore {
                     "createdAt", a.createdAt, "updatedAt", a.updatedAt, "services", services, "messages", messages,
                     "unreadCustomer", a.unreadCustomer, "unreadGarage", a.unreadGarage,
                     "payStatus", a.payStatus, "payMethod", a.payMethod, "rating", a.rating,
-                    "reviewComment", a.reviewComment, "reviewAt", a.reviewAt));
+                    "reviewComment", a.reviewComment, "reviewAt", a.reviewAt, "card", a.card == null ? null : cardStore(a.card)));
         }
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         Files.writeString(tmp, Json.write(Json.obj("appointments", all)), StandardCharsets.UTF_8);
@@ -486,6 +653,7 @@ final class AppointmentStore {
             a.rating = ((Number) m.getOrDefault("rating", 0)).intValue();
             a.reviewComment = (String) m.getOrDefault("reviewComment", "");
             a.reviewAt = (String) m.getOrDefault("reviewAt", "");
+            if (m.get("card") instanceof Map<?, ?> cm) a.card = cardLoad((Map<String, Object>) cm);
             appts.put(a.id, a);
         }
     }

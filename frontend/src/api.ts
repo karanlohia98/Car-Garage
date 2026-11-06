@@ -116,6 +116,33 @@ export interface GarageDetail {
   mine?: boolean;
 }
 
+export type CheckState = 'ok' | 'attention' | 'notchecked';
+export interface CheckItem { item: string; state: CheckState; note: string }
+export interface WorkLine { kind: 'part' | 'labour'; text: string; qty: number; unit: number; total?: number }
+
+/** The workshop's digital job card for one appointment. */
+export interface JobCard {
+  exists: boolean;
+  odometer: number;
+  fuel: string;
+  technician: string;
+  checklist: CheckItem[];
+  work: WorkLine[];
+  /** Approval state of the extra work. */
+  estimate: 'none' | 'sent' | 'approved' | 'declined';
+  estimateTotal: number;
+  extraTotal: number;
+  bookedTotal: number;
+}
+
+export interface JobCardInput {
+  odometer: number;
+  fuel: string;
+  technician: string;
+  checklist: CheckItem[];
+  work: WorkLine[];
+}
+
 export type PayStatus = 'unpaid' | 'reported' | 'paid';
 
 export type ApptStatus = 'requested' | 'booked' | 'at_garage' | 'in_progress' | 'completed' | 'picked_up' | 'declined' | 'cancelled';
@@ -175,6 +202,9 @@ export interface ApptDetail {
   canReview: boolean;
   review: { rating: number; comment: string; at: string } | null;
   garagePay: PayInfo | null;
+  card: JobCard;
+  cardItems: string[];
+  canEditCard: boolean;
 }
 
 export interface BookingInput {
@@ -391,3 +421,9 @@ export const reviewAppointment = (id: string, rating: number, comment: string) =
     method: 'POST',
     body: JSON.stringify({ rating, comment }),
   });
+
+export const saveJobCard = (id: string, input: JobCardInput) =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/jobcard`, { method: 'PUT', body: JSON.stringify(input) });
+
+export const estimateAction = (id: string, action: 'send' | 'approve' | 'decline') =>
+  request<{ appointment: ApptDetail }>(`/api/appointments/${encodeURIComponent(id)}/estimate`, { method: 'POST', body: JSON.stringify({ action }) });

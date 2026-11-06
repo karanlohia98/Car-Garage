@@ -208,6 +208,12 @@ public final class Main {
         } else if (parts.length == 2 && parts[1].equals("messages")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("jobcard")) {
+            if (!m.equals("PUT")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.saveCard(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
+        } else if (parts.length == 2 && parts[1].equals("estimate")) {
+            if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
+            send(ex, 200, Json.write(Json.obj("appointment", appts.estimate(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
         } else if (parts.length == 2 && parts[1].equals("payment")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
             send(ex, 200, Json.write(Json.obj("appointment", appts.pay(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));

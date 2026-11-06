@@ -60,6 +60,16 @@ before approval.
   The garage's average rating updates and recent reviews appear on its page.
 - After *Work completed* the job has a final step, **Car picked up**, which either the garage or the driver can mark.
 
+## Digital job card
+
+Each appointment has a job card that replaces the paper card in the workshop. Once a booking is accepted the garage can
+record the odometer, fuel level and technician, run through an inspection checklist (brakes, tires, lights, battery,
+fluids, wipers, suspension, engine bay: OK / needs attention / not checked, with a short note), and add extra parts and
+labour with quantities and prices. The total (booked services + extra work) updates as they type and feeds the payment
+step. Extra work is sent to the driver as an estimate, which they approve or decline; changing the extra work afterwards
+sends it back for approval. Drivers see the card read-only, and either side can print it. The card locks once the car is
+picked up. Photos and PDF export are not included yet.
+
 ## Appointments and chat
 
 1. A driver opens a garage, clicks **Book an appointment**, picks services, their car, a date and time, and sends the

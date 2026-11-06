@@ -38,6 +38,207 @@ const formatStamp = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
+const FUELS = ['Empty', '1/4', '1/2', '3/4', 'Full'];
+const STATE_LABEL: Record<string, string> = { ok: 'OK', attention: 'Needs attention', notchecked: 'Not checked' };
+
+/**
+ * The digital job card. The garage fills it in while the car is in the workshop (intake details, inspection,
+ * extra parts and labour). The driver sees it read-only and approves or declines extra work.
+ */
+function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; onError: (e: unknown) => void }) {
+  const { d, onUpdate, onError } = props;
+  const c = d.card;
+  const editable = d.canEditCard;
+  const [odo, setOdo] = useState(c.odometer ? String(c.odometer) : '');
+  const [fuel, setFuel] = useState(c.fuel);
+  const [tech, setTech] = useState(c.technician);
+  const [checks, setChecks] = useState<Record<string, { state: api.CheckState; note: string }>>(() =>
+    Object.fromEntries(d.cardItems.map((i) => {
+      const found = c.checklist.find((x) => x.item === i);
+      return [i, { state: found?.state ?? 'notchecked', note: found?.note ?? '' }];
+    })),
+  );
+  const [work, setWork] = useState<api.WorkLine[]>(c.work.map(({ kind, text, qty, unit }) => ({ kind, text, qty, unit })));
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const extra = work.reduce((n, w) => n + (Number(w.qty) || 0) * (Number(w.unit) || 0), 0);
+  const run = async (fn: () => Promise<{ appointment: ApptDetail }>, ok?: () => void) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onUpdate((await fn()).appointment);
+      ok?.();
+    } catch (e) {
+      if (e instanceof api.ApiError && e.status < 500 && e.status !== 401) setError(e.message);
+      else onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = () =>
+    run(
+      () =>
+        api.saveJobCard(d.id, {
+          odometer: Number(odo) || 0,
+          fuel,
+          technician: tech.trim(),
+          checklist: d.cardItems.map((i) => ({ item: i, state: checks[i].state, note: checks[i].note.trim() })),
+          work: work.map((w) => ({ ...w, text: w.text.trim(), qty: Number(w.qty), unit: Number(w.unit) })),
+        }),
+      () => setSaved(true),
+    );
+  const setLine = (i: number, patch: Partial<api.WorkLine>) => {
+    setSaved(false);
+    setWork(work.map((w, k) => (k === i ? { ...w, ...patch } : w)));
+  };
+
+  const est = c.estimate;
+  return (
+    <div className="job-card" aria-label="Job card">
+      <div className="job-head">
+        <h4>Job card</h4>
+        <button type="button" className="btn btn-ghost no-print" onClick={() => window.print()}>
+          Print
+        </button>
+      </div>
+      <p className="muted job-meta">
+        {d.vehicle}
+        {d.plate ? ` (${d.plate})` : ''} &middot; {d.customerName}
+      </p>
+
+      {editable ? (
+        <div className="job-intake">
+          <label>
+            Odometer
+            <input inputMode="numeric" value={odo} onChange={(e) => { setSaved(false); setOdo(e.target.value.replace(/\D/g, '').slice(0, 7)); }} placeholder="e.g. 48200" />
+          </label>
+          <label>
+            Fuel level
+            <select value={fuel} onChange={(e) => { setSaved(false); setFuel(e.target.value); }}>
+              <option value="">Not noted</option>
+              {FUELS.map((f) => <option key={f}>{f}</option>)}
+            </select>
+          </label>
+          <label>
+            Technician
+            <input value={tech} onChange={(e) => { setSaved(false); setTech(e.target.value); }} maxLength={40} placeholder="e.g. Sam" />
+          </label>
+        </div>
+      ) : (
+        <p className="job-meta">
+          {c.odometer ? <>Odometer {c.odometer.toLocaleString()} &middot; </> : null}
+          {c.fuel ? <>Fuel {c.fuel} &middot; </> : null}
+          {c.technician ? <>Technician {c.technician}</> : null}
+        </p>
+      )}
+
+      <h5>Inspection</h5>
+      <ul className="job-checks">
+        {d.cardItems.map((i) => {
+          const cur = editable ? checks[i] : c.checklist.find((x) => x.item === i) ?? { state: 'notchecked' as const, note: '' };
+          return (
+            <li key={i} className={`chk-${cur.state}`}>
+              <span>{i}</span>
+              {editable ? (
+                <>
+                  <select aria-label={`${i} state`} value={cur.state} onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], state: e.target.value as api.CheckState } }); }}>
+                    {Object.entries(STATE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                  <input aria-label={`${i} note`} value={cur.note} maxLength={80} placeholder="Note" onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], note: e.target.value } }); }} />
+                </>
+              ) : (
+                <>
+                  <b>{STATE_LABEL[cur.state]}</b>
+                  {cur.note && <em>{cur.note}</em>}
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <h5>Extra parts and labour</h5>
+      {work.length === 0 && !editable && <p className="muted">No extra work.</p>}
+      {work.length > 0 && (
+        <table className="job-work">
+          <thead>
+            <tr><th>Item</th><th>Qty</th><th>Each</th><th>Total</th>{editable && <th />}</tr>
+          </thead>
+          <tbody>
+            {work.map((w, i) => (
+              <tr key={i}>
+                <td>
+                  {editable ? (
+                    <div className="work-edit">
+                      <select aria-label="Type" value={w.kind} onChange={(e) => setLine(i, { kind: e.target.value as 'part' | 'labour' })}>
+                        <option value="part">Part</option>
+                        <option value="labour">Labour</option>
+                      </select>
+                      <input aria-label="Description" value={w.text} maxLength={60} placeholder="e.g. Front brake pads" onChange={(e) => setLine(i, { text: e.target.value })} />
+                    </div>
+                  ) : (
+                    <>{w.kind === 'part' ? 'Part' : 'Labour'}: {w.text}</>
+                  )}
+                </td>
+                <td>{editable ? <input aria-label="Quantity" inputMode="numeric" value={w.qty} onChange={(e) => setLine(i, { qty: Number(e.target.value.replace(/\D/g, '').slice(0, 2)) })} /> : w.qty}</td>
+                <td>{editable ? <input aria-label="Price each" inputMode="numeric" value={w.unit} onChange={(e) => setLine(i, { unit: Number(e.target.value.replace(/\D/g, '').slice(0, 5)) })} /> : `$${w.unit}`}</td>
+                <td>${(Number(w.qty) || 0) * (Number(w.unit) || 0)}</td>
+                {editable && (
+                  <td>
+                    <button type="button" className="icon-btn" aria-label="Remove line" onClick={() => { setSaved(false); setWork(work.filter((_, k) => k !== i)); }}>
+                      &times;
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {editable && work.length < 30 && (
+        <button type="button" className="btn btn-outline add no-print" onClick={() => { setSaved(false); setWork([...work, { kind: 'part', text: '', qty: 1, unit: 0 }]); }}>
+          + Add a part or labour line
+        </button>
+      )}
+
+      <div className="job-totals">
+        <span>Booked services <b>${c.bookedTotal}</b></span>
+        <span>Extra work <b>${editable ? extra : c.extraTotal}</b></span>
+        <span className="grand">Total <b>${c.bookedTotal + (editable ? extra : c.extraTotal)}</b></span>
+      </div>
+
+      {c.work.length > 0 && (
+        <div className={`estimate est-${est}`}>
+          {est === 'none' && <span>Extra work not yet sent for approval.</span>}
+          {est === 'sent' && <span>Extra work of ${c.estimateTotal} is waiting for the customer&apos;s approval.</span>}
+          {est === 'approved' && <span>Customer approved the extra work (${c.estimateTotal}).</span>}
+          {est === 'declined' && <span>Customer declined the extra work. Talk to them before going ahead.</span>}
+          {d.role === 'customer' && est === 'sent' && (
+            <span className="action-row no-print">
+              <button className="btn btn-primary" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'approve'))}>Approve extra work</button>
+              <button className="btn btn-danger" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'decline'))}>Decline</button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && <div className="notice error" role="alert">{error}</div>}
+      {editable && (
+        <div className="action-row no-print">
+          <button className="btn btn-primary" disabled={busy} onClick={save}>{saved ? 'Saved ✓' : 'Save job card'}</button>
+          {c.work.length > 0 && est !== 'sent' && est !== 'approved' && (
+            <button className="btn btn-outline" disabled={busy || !saved} title={saved ? '' : 'Save the job card first'} onClick={() => run(() => api.estimateAction(d.id, 'send'))}>
+              Send extra work for approval
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
 
 /** Tracks payment. Money goes directly to the garage; the driver reports it and the garage confirms it. */
@@ -370,6 +571,7 @@ export function AppointmentPanel(props: {
         </div>
       )}
 
+      {d.card.exists || d.canEditCard ? <JobCardSection d={d} onUpdate={apply} onError={handle} /> : null}
       {(d.canPay || d.payStatus === 'paid') && <PaySection d={d} onUpdate={apply} onError={handle} />}
       {(d.canReview || d.review) && <ReviewSection d={d} onUpdate={apply} onError={handle} />}
 

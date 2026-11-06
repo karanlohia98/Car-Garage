@@ -223,7 +223,7 @@ export default function GarageDashboard(props: {
           <h2>{garage ? garage.name : `Hi ${user.name.split(' ')[0]}, let's list your garage`}</h2>
           <p className="muted">
             {garage
-              ? 'Accept bookings, chat with customers and keep them updated as the work moves along. Use the switch above to browse as a driver.'
+              ? 'Accept bookings, chat with customers and keep them updated as the work moves along.'
               : 'Answer a few quick questions and your garage appears in the directory. You can change your answers any time.'}
           </p>
         </div>
