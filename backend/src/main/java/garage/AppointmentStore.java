@@ -199,10 +199,10 @@ final class AppointmentStore {
     // ---------- shared ----------
 
     /** Opening an appointment marks it as read for the viewer. */
-    synchronized Map<String, Object> detail(String id, String viewer, GarageStore gs) throws IOException {
+    synchronized Map<String, Object> detail(String id, String viewer, String as, GarageStore gs) throws IOException {
         Appt a = appts.get(id);
         if (a == null) throw new NotFound("Appointment not found.");
-        String role = roleOf(a, viewer, gs);
+        String role = roleOf(a, viewer, as, gs);
         int before = role.equals("customer") ? a.unreadCustomer : a.unreadGarage;
         if (before > 0) {
             if (role.equals("customer")) a.unreadCustomer = 0;
@@ -212,10 +212,10 @@ final class AppointmentStore {
         return detailJson(a, role, gs.find(a.garageId));
     }
 
-    synchronized Map<String, Object> post(String id, String viewer, Map<String, Object> b, GarageStore gs) throws IOException {
+    synchronized Map<String, Object> post(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
         Appt a = appts.get(id);
         if (a == null) throw new NotFound("Appointment not found.");
-        String role = roleOf(a, viewer, gs);
+        String role = roleOf(a, viewer, as, gs);
         if (!OPEN.contains(a.status) && !a.status.equals(COMPLETED)) {
             throw new GarageStore.Invalid("This appointment is closed, so messages can't be added.");
         }
@@ -227,10 +227,10 @@ final class AppointmentStore {
         return detailJson(a, role, gs.find(a.garageId));
     }
 
-    synchronized Map<String, Object> changeStatus(String id, String viewer, Map<String, Object> b, GarageStore gs) throws IOException {
+    synchronized Map<String, Object> changeStatus(String id, String viewer, String as, Map<String, Object> b, GarageStore gs) throws IOException {
         Appt a = appts.get(id);
         if (a == null) throw new NotFound("Appointment not found.");
-        String role = roleOf(a, viewer, gs);
+        String role = roleOf(a, viewer, as, gs);
         String next = b.get("status") instanceof String s ? s : "";
         Map<String, List<String>> rules = role.equals("garage") ? GARAGE_NEXT : CUSTOMER_NEXT;
         if (!rules.getOrDefault(a.status, List.of()).contains(next)) {
@@ -250,10 +250,10 @@ final class AppointmentStore {
 
     // ---------- helpers ----------
 
-    private String roleOf(Appt a, String viewer, GarageStore gs) {
-        if (a.customerEmail.equalsIgnoreCase(viewer)) return "customer";
+    private String roleOf(Appt a, String viewer, String as, GarageStore gs) {
+        if (a.customerEmail.equalsIgnoreCase(viewer) && as.equals("customer")) return "customer";
         GarageStore.Garage g = gs.find(a.garageId);
-        if (g != null && g.ownerEmail().equalsIgnoreCase(viewer)) return "garage";
+        if (g != null && g.ownerEmail().equalsIgnoreCase(viewer) && as.equals("garage")) return "garage";
         throw new NotFound("Appointment not found.");
     }
 

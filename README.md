@@ -7,10 +7,11 @@ A one-page directory of car garages.
 
 ## How it works
 
-**One account, two sides.** Everyone signs up once with an email. The same login works as a driver *and* as a garage
-owner, and a switch in the header flips between **Find a garage** and **My garage** (or **List my garage** if you
-haven't set one up yet). The driver profile and the garage profile are separate: the garage has its own name,
-address, services and prices. Garage owners can open the driver pages any time to see what customers see.
+**Separate logins.** Drivers and garage owners sign up and log in separately (use the *Driver* / *Garage owner*
+switch in the sign-in window, or the *Driver login* / *Garage login* buttons). The same email can hold one account of
+each kind, each with its own password. Garage owner accounts only see the garage dashboard (appointments, chat,
+profile); driver accounts only see the directory and *My bookings*. The server enforces this: garage accounts can't
+book, driver accounts can't manage a garage. Accounts created before roles existed still work for both logins.
 
 **Drivers**
 1. Browse the public list of garages, search by name/area/city and filter by service.
@@ -18,7 +19,7 @@ address, services and prices. Garage owners can open the driver pages any time t
 3. If a garage prefers to publish prices on its own site, the driver sees its services and a "Visit their website" button.
 
 **Garage owners**
-1. Click **List my garage** (sign up first if you have no account yet).
+1. Click **Register my garage** and create a garage owner account (or use **Garage login**).
 2. Answer a few questions in the dashboard: name, location and hours, how customers should see prices, and services.
 3. Choose **either**:
    - *Send customers to my website*: enter your site address; customers are linked to it, or
@@ -96,9 +97,9 @@ Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 
 | Method | Path               | Auth                | Description |
 |--------|--------------------|---------------------|-------------|
-| POST   | `/api/signup`      | none                | `{name,email,password}` -> `{token,user}` |
-| POST   | `/api/login`       | none                | `{email,password}` -> `{token,user}` |
-| GET    | `/api/me`          | Bearer              | current user (`hasGarage` tells you if they also own a garage) |
+| POST   | `/api/signup`      | none                | `{name,email,password,role}` (`role`: `driver` or `garage`) -> `{token,user}` |
+| POST   | `/api/login`       | none                | `{email,password,role}` -> `{token,user}` |
+| GET    | `/api/me`          | Bearer              | current user (`role`, `hasGarage`) |
 | POST   | `/api/logout`      | Bearer              | ends the session |
 | GET    | `/api/catalog`     | none                | standard service list garages can pick from |
 | GET    | `/api/garages?zip=&range=` | none        | approved, published garages near a ZIP (`range`: `exact`, `near`, `wide`), **no prices** |

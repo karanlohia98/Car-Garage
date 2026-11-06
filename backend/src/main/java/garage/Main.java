@@ -95,16 +95,20 @@ public final class Main {
         if (name.isEmpty() || name.length() > 80) { error(ex, 400, "Please enter your name."); return; }
         if (!EMAIL.matcher(email).matches() || email.length() > 120) { error(ex, 400, "Please enter a valid email."); return; }
         if (password.length() < 8 || password.length() > 128) { error(ex, 400, "Password must be at least 8 characters."); return; }
-        UserStore.User u = store.register(name, email, password);
-        if (u == null) { error(ex, 409, "An account with that email already exists."); return; }
+        String role = b.getOrDefault("role", UserStore.DRIVER);
+        if (!UserStore.validRole(role)) { error(ex, 400, "Choose driver or garage owner."); return; }
+        UserStore.User u = store.register(name, email, password, role);
+        if (u == null) { error(ex, 409, "A " + (role.equals(UserStore.GARAGE) ? "garage owner" : "driver") + " account with that email already exists. Log in instead."); return; }
         send(ex, 201, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u, garageStore))));
     }
 
     private static void login(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         if (!method(ex, "POST")) return;
         Map<String, String> b = Json.parseFlatObject(body(ex));
-        UserStore.User u = store.authenticate(b.getOrDefault("email", "").trim(), b.getOrDefault("password", ""));
-        if (u == null) { error(ex, 401, "Incorrect email or password."); return; }
+        String role = b.getOrDefault("role", UserStore.DRIVER);
+        if (!UserStore.validRole(role)) { error(ex, 400, "Choose driver or garage owner."); return; }
+        UserStore.User u = store.authenticate(b.getOrDefault("email", "").trim(), b.getOrDefault("password", ""), role);
+        if (u == null) { error(ex, 401, "Incorrect email or password for this kind of account."); return; }
         send(ex, 200, Json.write(Json.obj("token", store.createSession(u), "user", userJson(u, garageStore))));
     }
 
@@ -147,6 +151,7 @@ public final class Main {
     private static void myGarage(HttpExchange ex, UserStore store, GarageStore garageStore) throws Exception {
         UserStore.User u = store.userForToken(bearer(ex));
         if (u == null) { error(ex, 401, "Please sign in."); return; }
+        if (!u.role().equals(UserStore.GARAGE)) { error(ex, 403, "Only garage owner accounts can manage a garage."); return; }
         String m = ex.getRequestMethod();
         if (m.equals("GET")) {
             send(ex, 200, Json.write(Json.obj("garage", garageStore.ownerView(u.email()))));
@@ -163,6 +168,7 @@ public final class Main {
         if (!method(ex, "GET")) return;
         UserStore.User u = store.userForToken(bearer(ex));
         if (u == null) { error(ex, 401, "Please sign in."); return; }
+        if (!u.role().equals(UserStore.GARAGE)) { error(ex, 403, "Only garage owner accounts have garage appointments."); return; }
         send(ex, 200, Json.write(Json.obj("appointments", appts.listForGarage(u.email(), garageStore))));
     }
 
@@ -179,8 +185,10 @@ public final class Main {
         String rest = ex.getRequestURI().getPath().substring("/api/appointments".length());
         if (rest.endsWith("/") && rest.length() > 1) rest = rest.substring(0, rest.length() - 1);
         String m = ex.getRequestMethod();
+        String as = u.role().equals(UserStore.GARAGE) ? "garage" : "customer";
 
         if (rest.isEmpty() || rest.equals("/")) {
+            if (as.equals("garage")) { error(ex, 403, "Garage owner accounts can't book. Use a driver account."); return; }
             if (m.equals("GET")) {
                 send(ex, 200, Json.write(Json.obj("appointments", appts.listForCustomer(u.email()))));
             } else if (m.equals("POST")) {
@@ -196,13 +204,13 @@ public final class Main {
         String id = parts[0];
         if (parts.length == 1) {
             if (!m.equals("GET")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
-            send(ex, 200, Json.write(Json.obj("appointment", appts.detail(id, u.email(), garageStore))));
+            send(ex, 200, Json.write(Json.obj("appointment", appts.detail(id, u.email(), as, garageStore))));
         } else if (parts.length == 2 && parts[1].equals("messages")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
-            send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), Json.parseObject(body(ex)), garageStore))));
+            send(ex, 200, Json.write(Json.obj("appointment", appts.post(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
         } else if (parts.length == 2 && parts[1].equals("status")) {
             if (!m.equals("POST")) { send(ex, 405, Json.write(Json.obj("error", "Method not allowed"))); return; }
-            send(ex, 200, Json.write(Json.obj("appointment", appts.changeStatus(id, u.email(), Json.parseObject(body(ex)), garageStore))));
+            send(ex, 200, Json.write(Json.obj("appointment", appts.changeStatus(id, u.email(), as, Json.parseObject(body(ex)), garageStore))));
         } else {
             error(ex, 404, "Not found.");
         }
@@ -298,7 +306,7 @@ public final class Main {
     }
 
     private static Map<String, Object> userJson(UserStore.User u, GarageStore garageStore) {
-        return Json.obj("name", u.name(), "email", u.email(), "hasGarage", garageStore.hasGarage(u.email()));
+        return Json.obj("name", u.name(), "email", u.email(), "role", u.role(), "hasGarage", garageStore.hasGarage(u.email()));
     }
 
     private static boolean method(HttpExchange ex, String m) throws IOException {

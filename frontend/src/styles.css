@@ -445,3 +445,6 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 
 .qa .two, .qa .three { align-items: start; }
 .qa label { align-content: start; }
+.role-seg { margin: 6px 0 14px; width: 100%; }
+.role-seg button { flex: 1; }
+.role-tag { display: inline-flex; gap: 8px; align-items: center; font-weight: 700; color: var(--accent-2); }

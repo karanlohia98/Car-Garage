@@ -1,9 +1,13 @@
 export type PricingMode = 'listing' | 'website';
 
-/** One account per email. Every user is a driver; hasGarage says whether they also own a garage profile. */
+/** Separate login for drivers and garage owners (the same email may hold one of each). */
+export type Role = 'driver' | 'garage';
+
 export interface User {
   name: string;
   email: string;
+  /** Drivers and garage owners have separate logins. */
+  role: Role;
   hasGarage: boolean;
 }
 
@@ -230,11 +234,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-export const signup = (name: string, email: string, password: string) =>
-  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+export const signup = (name: string, email: string, password: string, role: Role) =>
+  request<AuthResponse>('/api/signup', { method: 'POST', body: JSON.stringify({ name, email, password, role }) });
 
-export const login = (email: string, password: string) =>
-  request<AuthResponse>('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+export const login = (email: string, password: string, role: Role) =>
+  request<AuthResponse>('/api/login', { method: 'POST', body: JSON.stringify({ email, password, role }) });
 
 export const me = () => request<{ user: User }>('/api/me');
 
