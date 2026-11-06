@@ -40,6 +40,9 @@ public final class Main {
         Path garagesFile = Path.of(System.getenv().getOrDefault("GARAGES_FILE", "data/garages.json"));
         boolean seedSamples = !"false".equalsIgnoreCase(System.getenv("SEED_SAMPLES"));
         GarageStore garageStore = new GarageStore(garagesFile, seedSamples);
+        if ("add".equalsIgnoreCase(System.getenv("SEED_SAMPLES"))) {
+            System.out.println("SEED_SAMPLES=add: added " + garageStore.addMissingSamples() + " sample garage(s); existing garages untouched.");
+        }
         AppointmentStore appointments = new AppointmentStore(
                 Path.of(System.getenv().getOrDefault("APPOINTMENTS_FILE", "data/appointments.json")));
 

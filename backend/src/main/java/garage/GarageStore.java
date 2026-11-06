@@ -158,6 +158,19 @@ final class GarageStore {
         }
     }
 
+    /** Adds any sample garages that are missing (matched by id) without touching existing ones. Returns how many were added. */
+    synchronized int addMissingSamples() throws IOException {
+        int n = 0;
+        for (Garage g : samples()) {
+            if (!garages.containsKey(g.id())) {
+                garages.put(g.id(), g);
+                n++;
+            }
+        }
+        if (n > 0) persist();
+        return n;
+    }
+
     // ---------- public API ----------
 
     static List<Object> catalog() {

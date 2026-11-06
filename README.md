@@ -123,7 +123,7 @@ Type-check the frontend with `npm run typecheck` (inside `frontend/`).
 
 `COUNTRY=IN` (default) uses 6-digit PIN codes, rupees (₹, Indian digit grouping) and UPI as a payment method; PIN search
 matches by prefix (same PIN, nearby, wider area). `COUNTRY=US` uses 5-digit ZIP codes and dollars. The frontend reads
-`/api/config`. Fresh installs seed Ahmedabad sample garages (invented) unless `SEED_SAMPLES=false`.
+`/api/config`. Fresh installs seed Ahmedabad sample garages (invented) unless `SEED_SAMPLES=false`. On an existing data folder, start once with `SEED_SAMPLES=add` to add any missing sample garages without touching the garages already there.
 
 ## Notifications, photos, reminders and languages
 
