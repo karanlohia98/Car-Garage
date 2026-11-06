@@ -1,3 +1,4 @@
+import { localizeData, t } from './i18n';
 export type PricingMode = 'listing' | 'website';
 
 /** Separate login for drivers and garage owners (the same email may hold one of each). */
@@ -53,11 +54,11 @@ export interface SiteData extends GarageSummary {
 
 export type PayMethod = 'cash' | 'card' | 'upi' | 'transfer' | 'online';
 export const PAY_LABELS: Record<PayMethod, string> = {
-  cash: 'Cash',
-  card: 'Card at the garage',
+  cash: t('Cash'),
+  card: t('Card at the garage'),
   upi: 'UPI',
-  transfer: 'Bank transfer',
-  online: 'Online payment link',
+  transfer: t('Bank transfer'),
+  online: t('Online payment link'),
 };
 
 /** How a garage accepts payment. Payments are tracked here, but made directly to the garage. */
@@ -319,9 +320,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const msg = (data as { error?: string } | null)?.error ?? 'Something went wrong. Please try again.';
-    throw new ApiError(msg, res.status);
+    throw new ApiError(t(msg), res.status);
   }
-  return data as T;
+  return localizeData(data) as T;
 }
 
 export const signup = (name: string, email: string, password: string, role: Role) =>

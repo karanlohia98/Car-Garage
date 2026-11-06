@@ -3,27 +3,27 @@ import { FaCar, FaClock, FaMapMarkerAlt, FaPaperPlane, FaPhoneAlt } from 'react-
 import * as api from './api';
 import type { ApptDetail, ApptStatus, ApptSummary, GarageDetail } from './api';
 import { money, waLink } from './config';
-import { t } from './i18n';
+import { t, tf, tMessage } from './i18n';
 
 /** The happy path, in order. requested / declined / cancelled sit outside it. */
 const STEPS: { status: ApptStatus; label: string }[] = [
-  { status: 'booked', label: 'Appointment booked' },
-  { status: 'at_garage', label: 'Car at the garage' },
-  { status: 'in_progress', label: 'Work in progress' },
-  { status: 'completed', label: 'Work completed' },
-  { status: 'picked_up', label: 'Car picked up' },
+  { status: 'booked', label: t('Appointment booked') },
+  { status: 'at_garage', label: t('Car at the garage') },
+  { status: 'in_progress', label: t('Work in progress') },
+  { status: 'completed', label: t('Work completed') },
+  { status: 'picked_up', label: t('Car picked up') },
 ];
 
 const GARAGE_BUTTON: Record<string, string> = {
-  booked: 'Accept appointment',
+  booked: t('Accept appointment'),
   declined: 'Decline',
-  at_garage: 'Car has arrived at the garage',
-  in_progress: 'Start the work',
-  completed: 'Mark work completed',
-  picked_up: 'Car handed back to the owner',
-  cancelled: 'Cancel appointment',
+  at_garage: t('Car has arrived at the garage'),
+  in_progress: t('Start the work'),
+  completed: t('Mark work completed'),
+  picked_up: t('Car handed back to the owner'),
+  cancelled: t('Cancel appointment'),
 };
-const CUSTOMER_BUTTON: Record<string, string> = { cancelled: 'Cancel my appointment', picked_up: 'I picked up my car' };
+const CUSTOMER_BUTTON: Record<string, string> = { cancelled: t('Cancel my appointment'), picked_up: t('I picked up my car') };
 const DANGER = new Set<string>(['declined', 'cancelled']);
 
 const localToday = (): string => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -67,7 +67,7 @@ function PhotoThumb(props: { apptId: string; photo: api.Photo; onRemove?: () => 
     <figure className="photo">
       {url ? <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={photo.caption || 'Job photo'} /></a> : <div className="photo-wait" />}
       {photo.caption && <figcaption>{photo.caption}</figcaption>}
-      {onRemove && <button type="button" className="icon-btn photo-x no-print" aria-label="Remove photo" onClick={onRemove}>&times;</button>}
+      {onRemove && <button type="button" className="icon-btn photo-x no-print" aria-label={t('Remove photo')} onClick={onRemove}>&times;</button>}
     </figure>
   );
 }
@@ -108,7 +108,7 @@ function PhotoSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void;
       )}
       {d.canAddPhoto && (
         <div className="photo-add no-print">
-          <input value={caption} maxLength={80} placeholder="Caption, e.g. Worn front brake pad" aria-label="Photo caption" onChange={(e) => setCaption(e.target.value)} />
+          <input value={caption} maxLength={80} placeholder={t('Caption, e.g. Worn front brake pad')} aria-label={t('Photo caption')} onChange={(e) => setCaption(e.target.value)} />
           <label className={`btn btn-outline${busy ? ' disabled' : ''}`}>
             {busy ? t('Uploading...') : t('Add photo')}
             <input type="file" accept="image/*" capture="environment" hidden disabled={busy} onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
@@ -121,7 +121,7 @@ function PhotoSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void;
 }
 
 const FUELS = ['Empty', '1/4', '1/2', '3/4', 'Full'];
-const STATE_LABEL: Record<string, string> = { ok: 'OK', attention: 'Needs attention', notchecked: 'Not checked' };
+const STATE_LABEL: Record<string, string> = { ok: 'OK', attention: t('Needs attention'), notchecked: t('Not checked') };
 
 /**
  * The digital job card. The garage fills it in while the car is in the workshop (intake details, inspection,
@@ -196,18 +196,18 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
         <div className="job-intake">
           <label>
             {t('Odometer')}
-            <input inputMode="numeric" value={odo} onChange={(e) => { setSaved(false); setOdo(e.target.value.replace(/\D/g, '').slice(0, 7)); }} placeholder="e.g. 48200" />
+            <input inputMode="numeric" value={odo} onChange={(e) => { setSaved(false); setOdo(e.target.value.replace(/\D/g, '').slice(0, 7)); }} placeholder={t('e.g. 48200')} />
           </label>
           <label>
             {t('Fuel level')}
             <select value={fuel} onChange={(e) => { setSaved(false); setFuel(e.target.value); }}>
-              <option value="">Not noted</option>
-              {FUELS.map((f) => <option key={f}>{f}</option>)}
+              <option value="">{t('Not noted')}</option>
+              {FUELS.map((f) => <option key={f} value={f}>{t(f)}</option>)}
             </select>
           </label>
           <label>
             {t('Technician')}
-            <input value={tech} onChange={(e) => { setSaved(false); setTech(e.target.value); }} maxLength={40} placeholder="e.g. Sam" />
+            <input value={tech} onChange={(e) => { setSaved(false); setTech(e.target.value); }} maxLength={40} placeholder={t('e.g. Sam')} />
           </label>
           <label>
             {t('Next service due')}
@@ -229,13 +229,13 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
           const cur = editable ? checks[i] : c.checklist.find((x) => x.item === i) ?? { state: 'notchecked' as const, note: '' };
           return (
             <li key={i} className={`chk-${cur.state}`}>
-              <span>{i}</span>
+              <span>{t(i)}</span>
               {editable ? (
                 <>
                   <select aria-label={`${i} state`} value={cur.state} onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], state: e.target.value as api.CheckState } }); }}>
                     {Object.entries(STATE_LABEL).map(([k, v]) => <option key={k} value={k}>{t(v)}</option>)}
                   </select>
-                  <input aria-label={`${i} note`} value={cur.note} maxLength={80} placeholder="Note" onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], note: e.target.value } }); }} />
+                  <input aria-label={`${i} note`} value={cur.note} maxLength={80} placeholder={t('Note')} onChange={(e) => { setSaved(false); setChecks({ ...checks, [i]: { ...checks[i], note: e.target.value } }); }} />
                 </>
               ) : (
                 <>
@@ -263,22 +263,22 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
                 <td>
                   {editable ? (
                     <div className="work-edit">
-                      <select aria-label="Type" value={w.kind} onChange={(e) => setLine(i, { kind: e.target.value as 'part' | 'labour' })}>
+                      <select aria-label={t('Type')} value={w.kind} onChange={(e) => setLine(i, { kind: e.target.value as 'part' | 'labour' })}>
                         <option value="part">{t('Part')}</option>
                         <option value="labour">{t('Labour')}</option>
                       </select>
-                      <input aria-label="Description" value={w.text} maxLength={60} placeholder="e.g. Front brake pads" onChange={(e) => setLine(i, { text: e.target.value })} />
+                      <input aria-label={t('Description')} value={w.text} maxLength={60} placeholder="e.g. Front brake pads" onChange={(e) => setLine(i, { text: e.target.value })} />
                     </div>
                   ) : (
-                    <>{w.kind === 'part' ? 'Part' : 'Labour'}: {w.text}</>
+                    <>{w.kind === 'part' ? t('Part') : t('Labour')}: {w.text}</>
                   )}
                 </td>
-                <td>{editable ? <input aria-label="Quantity" inputMode="numeric" value={w.qty} onChange={(e) => setLine(i, { qty: Number(e.target.value.replace(/\D/g, '').slice(0, 2)) })} /> : w.qty}</td>
-                <td>{editable ? <input aria-label="Price each" inputMode="numeric" value={w.unit} onChange={(e) => setLine(i, { unit: Number(e.target.value.replace(/\D/g, '').slice(0, 6)) })} /> : money(w.unit)}</td>
+                <td>{editable ? <input aria-label={t('Quantity')} inputMode="numeric" value={w.qty} onChange={(e) => setLine(i, { qty: Number(e.target.value.replace(/\D/g, '').slice(0, 2)) })} /> : w.qty}</td>
+                <td>{editable ? <input aria-label={t('Price each')} inputMode="numeric" value={w.unit} onChange={(e) => setLine(i, { unit: Number(e.target.value.replace(/\D/g, '').slice(0, 6)) })} /> : money(w.unit)}</td>
                 <td>{money((Number(w.qty) || 0) * (Number(w.unit) || 0))}</td>
                 {editable && (
                   <td>
-                    <button type="button" className="icon-btn" aria-label="Remove line" onClick={() => { setSaved(false); setWork(work.filter((_, k) => k !== i)); }}>
+                    <button type="button" className="icon-btn" aria-label={t('Remove line')} onClick={() => { setSaved(false); setWork(work.filter((_, k) => k !== i)); }}>
                       &times;
                     </button>
                   </td>
@@ -290,7 +290,7 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       )}
       {editable && work.length < 30 && (
         <button type="button" className="btn btn-outline add no-print" onClick={() => { setSaved(false); setWork([...work, { kind: 'part', text: '', qty: 1, unit: 0 }]); }}>
-          + Add a part or labour line
+          {t('+ Add a part or labour line')}
         </button>
       )}
 
@@ -302,10 +302,10 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
 
       {c.work.length > 0 && (
         <div className={`estimate est-${est}`}>
-          {est === 'none' && <span>Extra work not yet sent for approval.</span>}
+          {est === 'none' && <span>{t('Extra work not yet sent for approval.')}</span>}
           {est === 'sent' && <span>Extra work of {money(c.estimateTotal)} is waiting for the customer&apos;s approval.</span>}
           {est === 'approved' && <span>Customer approved the extra work ({money(c.estimateTotal)}).</span>}
-          {est === 'declined' && <span>Customer declined the extra work. Talk to them before going ahead.</span>}
+          {est === 'declined' && <span>{t('Customer declined the extra work. Talk to them before going ahead.')}</span>}
           {d.role === 'customer' && est === 'sent' && (
             <span className="action-row no-print">
               <button className="btn btn-primary" disabled={busy} onClick={() => run(() => api.estimateAction(d.id, 'approve'))}>{t('Approve extra work')}</button>
@@ -318,9 +318,9 @@ function JobCardSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => voi
       {error && <div className="notice error" role="alert">{error}</div>}
       {editable && (
         <div className="action-row no-print">
-          <button className="btn btn-primary" disabled={busy} onClick={save}>{saved ? 'Saved ✓' : 'Save job card'}</button>
+          <button className="btn btn-primary" disabled={busy} onClick={save}>{saved ? 'Saved ✓' : t('Save job card')}</button>
           {c.work.length > 0 && est !== 'sent' && est !== 'approved' && (
-            <button className="btn btn-outline" disabled={busy || !saved} title={saved ? '' : 'Save the job card first'} onClick={() => run(() => api.estimateAction(d.id, 'send'))}>
+            <button className="btn btn-outline" disabled={busy || !saved} title={saved ? '' : t('Save the job card first')} onClick={() => run(() => api.estimateAction(d.id, 'send'))}>
               {t('Send extra work for approval')}
             </button>
           )}
@@ -352,17 +352,17 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
   const label = (m: string) => api.PAY_LABELS[m as api.PayMethod] ?? m;
   return (
     <div className="pay-box" aria-label={t('Payment')}>
-      <h4>Payment {d.total > 0 && <small>(estimated total: from {money(d.total)})</small>}</h4>
+      <h4>{t('Payment')} {d.total > 0 && <small>{tf('(estimated total: from {price})', { price: money(d.total) })}</small>}</h4>
       {d.payStatus === 'paid' ? (
         <p className="pay-done">Paid{d.payMethod ? ` by ${label(d.payMethod).toLowerCase()}` : ''}. Thank you!</p>
       ) : isGarage ? (
         <>
           <p className="muted">
-            {d.payStatus === 'reported' ? `The customer says they paid by ${label(d.payMethod).toLowerCase()}.` : 'Waiting for the customer to pay.'}
+            {d.payStatus === 'reported' ? `The customer says they paid by ${label(d.payMethod).toLowerCase()}.` : t('Waiting for the customer to pay.')}
           </p>
           {d.payStatus !== 'reported' && (
             <label>
-              Paid by
+              {t('Paid by')}
               <select value={method} onChange={(e) => setMethod(e.target.value)}>
                 {(Object.keys(api.PAY_LABELS) as api.PayMethod[]).map((m) => <option key={m} value={m}>{api.PAY_LABELS[m]}</option>)}
               </select>
@@ -382,7 +382,7 @@ function PaySection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void; o
             </select>
           </label>
           {method === 'online' && d.garagePay?.link && (
-            <a className="btn btn-outline" href={d.garagePay.link} target="_blank" rel="noopener noreferrer">Open the garage&apos;s payment page</a>
+            <a className="btn btn-outline" href={d.garagePay.link} target="_blank" rel="noopener noreferrer">{t('Open the garage\'s payment page')}</a>
           )}
           {d.garagePay?.note && <p className="muted">Garage note: {d.garagePay.note}</p>}
           <button className="btn btn-primary" disabled={busy} onClick={() => run('report')}>{t('I\'ve paid')}</button>
@@ -401,7 +401,7 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
   if (d.review) {
     return (
       <div className="pay-box" aria-label={t('Review')}>
-        <h4>{d.role === 'customer' ? 'Your review' : 'Customer review'}</h4>
+        <h4>{d.role === 'customer' ? 'Your review' : t('Customer review')}</h4>
         <p className="review-stars" aria-label={`${d.review.rating} out of 5 stars`}>{stars(d.review.rating)}</p>
         {d.review.comment && <p>{d.review.comment}</p>}
       </div>
@@ -410,7 +410,7 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
   return (
     <div className="pay-box" aria-label={t('Leave a review')}>
       <h4>How did {d.garageName} do?</h4>
-      <div className="star-pick" role="group" aria-label="Rating">
+      <div className="star-pick" role="group" aria-label={t('Rating')}>
         {[1, 2, 3, 4, 5].map((n) => (
           <button type="button" key={n} className={n <= rating ? 'on' : ''} aria-label={`${n} star${n > 1 ? 's' : ''}`} aria-pressed={n === rating} onClick={() => setRating(n)}>
             ★
@@ -418,8 +418,8 @@ function ReviewSection(props: { d: ApptDetail; onUpdate: (a: ApptDetail) => void
         ))}
       </div>
       <label>
-        One line about your visit <small>(optional, max 140 characters)</small>
-        <input value={comment} onChange={(e) => setComment(e.target.value)} maxLength={140} placeholder="e.g. Fair price and ready on time" />
+        {t('One line about your visit')} <small>{t('(optional, max 140 characters)')}</small>
+        <input value={comment} onChange={(e) => setComment(e.target.value)} maxLength={140} placeholder={t('e.g. Fair price and ready on time')} />
       </label>
       <button
         className="btn btn-primary"
@@ -452,7 +452,7 @@ function Stepper({ status }: { status: ApptStatus }) {
   if (status === 'declined' || status === 'cancelled') {
     return (
       <div className="stepper-note closed">
-        {status === 'declined' ? 'The garage declined this appointment.' : 'This appointment was cancelled.'}
+        {status === 'declined' ? 'The garage declined this appointment.' : t('This appointment was cancelled.')}
       </div>
     );
   }
@@ -497,7 +497,7 @@ export function AppointmentPanel(props: {
 
   const handle = useCallback((e: unknown) => {
     if (e instanceof api.ApiError && e.status === 401) expiredRef.current();
-    else setError(e instanceof Error ? e.message : 'Something went wrong.');
+    else setError(e instanceof Error ? e.message : t('Something went wrong.'));
   }, []);
 
   const apply = useCallback((a: ApptDetail) => {
@@ -604,14 +604,14 @@ export function AppointmentPanel(props: {
           {d.services.map((s) => (
             <span className="fact-line" key={s.name}>
               {s.name}
-              {s.price > 0 && <b> from {money(s.price)}</b>}
+              {s.price > 0 && <b> {tf('from {price}', { price: money(s.price) })}</b>}
             </span>
           ))}
-          {d.total > 0 && <span className="fact-line total">Estimated total: from {money(d.total)}</span>}
+          {d.total > 0 && <span className="fact-line total">{tf('Estimated total: from {price}', { price: money(d.total) })}</span>}
         </dd>
         {d.notes && (
           <>
-            <dt>{isGarage ? 'Customer note' : 'Your note'}</dt>
+            <dt>{isGarage ? 'Customer note' : t('Your note')}</dt>
             <dd>{d.notes}</dd>
           </>
         )}
@@ -654,12 +654,12 @@ export function AppointmentPanel(props: {
         <div className="status-actions">
           {isGarage && (
             <label>
-              Add a note for the customer <small>(optional, sent with the update)</small>
+              {t('Add a note for the customer')} <small>{t('(optional, sent with the update)')}</small>
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={200}
-                placeholder="e.g. Front pads are worn, +{money(900)}. OK to go ahead?"
+                placeholder={tf('e.g. Front pads are worn, +{price}. OK to go ahead?', { price: money(900) })}
               />
             </label>
           )}
@@ -688,7 +688,7 @@ export function AppointmentPanel(props: {
           {d.messages.map((m, i) =>
             m.from === 'system' ? (
               <div className="msg system" key={i}>
-                <span>{m.text}</span>
+                <span>{tMessage(m.text)}</span>
                 <time>{formatStamp(m.at)}</time>
               </div>
             ) : (
@@ -707,11 +707,11 @@ export function AppointmentPanel(props: {
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKey}
               maxLength={300}
-              placeholder={isGarage ? 'Message the customer...' : 'Message the garage...'}
+              placeholder={isGarage ? t('Message the customer...') : t('Message the garage...')}
               aria-label={t('Message')}
             />
             <button className="btn btn-primary" onClick={send} disabled={busy || !text.trim()} aria-label={t('Send message')}>
-              <FaPaperPlane /> Send
+              <FaPaperPlane /> {t('Send')}
             </button>
           </div>
         ) : (
@@ -779,8 +779,8 @@ export function AppointmentsWorkspace(props: {
 
   const filters: [string, string][] =
     role === 'garage'
-      ? [['all', 'All'], ['action', 'Needs action'], ['active', 'Active'], ['done', 'Done']]
-      : [['all', 'All'], ['active', 'Active'], ['done', 'Done']];
+      ? [['all', t('All')], ['action', t('Needs action')], ['active', t('Active')], ['done', t('Done')]]
+      : [['all', t('All')], ['active', t('Active')], ['done', t('Done')]];
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -794,7 +794,7 @@ export function AppointmentsWorkspace(props: {
   return (
     <div className="appt-layout">
       <div className="appt-list-col">
-        <div className="chips" role="group" aria-label="Filter appointments">
+        <div className="chips" role="group" aria-label={t('Filter appointments')}>
           {filters.map(([key, label]) => (
             <button
               key={key}
@@ -817,9 +817,9 @@ export function AppointmentsWorkspace(props: {
           <p className="muted empty">
             {list.length === 0
               ? role === 'garage'
-                ? 'No appointments yet. When a driver books your garage, it shows up here.'
+                ? t('No appointments yet. When a driver books your garage, it shows up here.')
                 : 'No bookings yet. Find a garage and book an appointment.'
-              : 'Nothing here with this filter.'}
+              : t('Nothing here with this filter.')}
           </p>
         )}
         <ul className="appt-list">
@@ -918,7 +918,7 @@ export function BookingForm(props: {
       <div className="book-cta">
         <div>
           <h3>{t('Ready to book?')}</h3>
-          <p className="muted">Send {garage.name} a request. They&apos;ll accept it, and you can chat and follow the work here.</p>
+          <p className="muted">{tf("Send {garage} a request. They'll accept it, and you can chat and follow the work here.", { garage: garage.name })}</p>
         </div>
         <button className="btn btn-primary btn-lg" onClick={() => setOpen(true)}>
           {t('Book an appointment')}
@@ -940,7 +940,7 @@ export function BookingForm(props: {
                 {s.name}
                 {garage.mode === 'listing' && s.price > 0 && (
                   <b>
-                    {' '}from {money(s.finalPrice)}
+                    {' '}{tf('from {price}', { price: money(s.finalPrice) })}
                     {s.discount > 0 && <> ({s.discount}% off)</>}
                   </b>
                 )}
@@ -952,14 +952,14 @@ export function BookingForm(props: {
       <div className="two">
         <label>
           {t('Car make and model')}
-          <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="e.g. Honda Civic 2018" maxLength={60} autoComplete="off" />
+          <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder={t('e.g. Honda Civic 2018')} maxLength={60} autoComplete="off" />
         </label>
         <label>
           {t('Number plate')}
           <input
             value={plate}
             onChange={(e) => setPlate(e.target.value.toUpperCase())}
-            placeholder="e.g. ABC 1234"
+            placeholder={t('e.g. ABC 1234')}
             maxLength={10}
             autoComplete="off"
             spellCheck={false}
@@ -968,7 +968,7 @@ export function BookingForm(props: {
       </div>
       <label>
         {t('Mobile number (optional, for WhatsApp updates)')}
-        <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9+() -]/g, '').slice(0, 20))} placeholder="e.g. 98765 43210" autoComplete="tel" />
+        <input type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9+() -]/g, '').slice(0, 20))} placeholder={t('e.g. 98765 43210')} autoComplete="tel" />
       </label>
       <div className="two">
         <label>
@@ -987,7 +987,7 @@ export function BookingForm(props: {
         </label>
       </div>
       <label>
-        Short note for the garage <small>(optional, max 120 characters)</small>
+        {t('Short note for the garage')} <small>{t('(optional, max 120 characters)')}</small>
         <input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={120} placeholder={t('e.g. Grinding noise when braking')} />
       </label>
       {error && (
@@ -1000,7 +1000,7 @@ export function BookingForm(props: {
           {t('Cancel')}
         </button>
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? 'Sending...' : 'Send booking request'}
+          {busy ? 'Sending...' : t('Send booking request')}
         </button>
       </div>
     </form>

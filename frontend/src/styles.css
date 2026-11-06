@@ -535,7 +535,6 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 .btn.disabled { opacity: .6; pointer-events: none; }
 @media print { .photo-grid { grid-template-columns: repeat(4, 1fr); } }
 
-.lang-pick { border: 1px solid var(--line, #d7dbe2); border-radius: 8px; padding: 6px 8px; background: #fff; font: inherit; font-size: 14px; }
 
 /* Garage page: share + printable QR poster */
 .site-share { margin-left: 4px; }
@@ -545,3 +544,6 @@ article.garage-card:hover { transform: translateY(-3px); border-color: #4a515d; 
 .poster-sub { font-size: 24px; margin: 0; }
 .poster-url { font-size: 20px; font-weight: 600; word-break: break-all; }
 @media print { .site > *:not(.poster) { display: none !important; } .poster { position: static; min-height: 90vh; } }
+
+.lang-pick { border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; background: #1d2026; color: #f3f4f6; font: inherit; font-size: .9rem; font-weight: 600; cursor: pointer; color-scheme: dark; }
+.lang-pick option { background: #1d2026; color: #f3f4f6; }

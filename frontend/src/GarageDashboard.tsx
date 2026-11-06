@@ -14,6 +14,7 @@ import { AppointmentsWorkspace } from './Appointments';
 import { fullAddress, iconFor, isCustomService, isHttpUrl } from './shared';
 import { themeVars } from './SitePage';
 import { cfg, money, postalRe, postalExample } from './config';
+import { t, tf, tp } from './i18n';
 
 interface ServiceRow {
   key: string;
@@ -95,7 +96,7 @@ const toInput = (a: Answers, published: boolean): GarageInput => ({
   }),
 });
 
-const DAY_OPTIONS = ['Mon-Fri', 'Mon-Sat', 'Mon-Sun', 'Tue-Sat', 'Sat-Sun', 'Daily'];
+const DAY_OPTIONS = ['Mon-Fri', 'Mon-Sat', 'Mon-Sun', 'Tue-Sat', 'Sat-Sun', t('Daily')];
 const TIMES = Array.from({ length: 29 }, (_, i) => {
   const mins = 5 * 60 + i * 30;
   const h = Math.floor(mins / 60);
@@ -115,17 +116,17 @@ const parseHours = (h: string): { days: string; open: string; close: string } | 
   return m && DAY_OPTIONS.includes(m[1]) && TIMES.includes(m[2]) && TIMES.includes(m[3]) ? { days: m[1], open: m[2], close: m[3] } : null;
 };
 
-const STEPS = ['About your garage', 'Where & when', 'How should customers see prices?', 'Your services', 'Payments', 'Your page', 'Review & publish'] as const;
+const STEPS = [t('About your garage'), t('Where & when'), t('How should customers see prices?'), t('Your services'), t('Payments'), t('Your page'), t('Review & publish')] as const;
 
 /** One-sentence explanation shown under each step heading. */
 const stepHelp = (): string[] => [
-  'This is how your garage is named in the directory. Customers see your name first, so use the name on your sign.',
-  `Drivers search by ${cfg.postalLabel}, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.`,
-  'Pick one. You can switch later. Customers must be signed in to see prices either way.',
-  'Choose what you offer. Each service starts with a ready-made description and typical time that you can reword. Add a percentage off to promote a service.',
-  'Customers pay you directly. Tick how you accept payment; we track it so both sides know when a job is paid.',
-  'Every garage gets its own web page you can share as your website. Choose how it looks; the preview updates as you go.',
-  'Check everything below. New garages are reviewed by our team before they appear in the directory, usually within a day.',
+  t('This is how your garage is named in the directory. Customers see your name first, so use the name on your sign.'),
+  tp('Drivers search by {postal}, so we only show your garage to people near you. Your phone and hours appear on your page and in booking confirmations.'),
+  t('Pick one. You can switch later. Customers must be signed in to see prices either way.'),
+  t('Choose what you offer. Each service starts with a ready-made description and typical time that you can reword. Add a percentage off to promote a service.'),
+  t('Customers pay you directly. Tick how you accept payment; we track it so both sides know when a job is paid.'),
+  t('Every garage gets its own web page you can share as your website. Choose how it looks; the preview updates as you go.'),
+  t('Check everything below. New garages are reviewed by our team before they appear in the directory, usually within a day.'),
 ] as const;
 
 /** Returns an error message for the given step, or null if it is complete. */
@@ -134,22 +135,22 @@ function validateStep(step: number, a: Answers): string | null {
     case 0:
       return a.name.trim().length < 2 ? 'Please enter your garage name.' : null;
     case 1:
-      if (a.city.trim().length < 2) return 'Please enter your city.';
-      if (!postalRe().test(a.zip.trim())) return `Please enter your ${cfg.postalLength}-digit ${cfg.postalLabel}. Drivers find you by it.`;
-      if (a.address.trim().length < 5) return 'Please enter your street address.';
-      if (a.phone.replace(/\D/g, '').length < 7) return 'Please enter a valid phone number.';
-      if (a.hours.trim().length < 2) return 'Please tell customers your opening hours.';
+      if (a.city.trim().length < 2) return t('Please enter your city.');
+      if (!postalRe().test(a.zip.trim())) return tp('Please enter your {n}-digit {postal}. Drivers find you by it.');
+      if (a.address.trim().length < 5) return t('Please enter your street address.');
+      if (a.phone.replace(/\D/g, '').length < 7) return t('Please enter a valid phone number.');
+      if (a.hours.trim().length < 2) return t('Please tell customers your opening hours.');
       return null;
     case 2:
-      if (!a.mode) return 'Choose one of the two options.';
+      if (!a.mode) return t('Choose one of the two options.');
       if (a.mode === 'website' && !isHttpUrl(a.website.trim())) {
-        return 'Enter your full website address, starting with https://';
+        return t('Enter your full website address, starting with https://');
       }
       return null;
     case 3:
-      if (a.services.length === 0) return 'Add at least one service.';
+      if (a.services.length === 0) return t('Add at least one service.');
       for (const s of a.services) {
-        if (!s.id && s.name.trim().length < 2) return 'Give each custom service a name.';
+        if (!s.id && s.name.trim().length < 2) return t('Give each custom service a name.');
         if (a.mode === 'listing') {
           const p = Number(s.price);
           if (s.discount.trim() !== '' && (!Number.isInteger(Number(s.discount)) || Number(s.discount) < 1 || Number(s.discount) > 90)) {
@@ -162,8 +163,8 @@ function validateStep(step: number, a: Answers): string | null {
       }
       return null;
     case 4:
-      if (a.pay.methods.length === 0) return 'Choose at least one way customers can pay.';
-      if (a.pay.methods.includes('online') && !isHttpUrl(a.pay.link.trim())) return 'Enter your online payment link, starting with https://';
+      if (a.pay.methods.length === 0) return t('Choose at least one way customers can pay.');
+      if (a.pay.methods.includes('online') && !isHttpUrl(a.pay.link.trim())) return t('Enter your online payment link, starting with https://');
       return null;
     default:
       return null;
@@ -220,12 +221,12 @@ export default function GarageDashboard(props: {
     <section id="dashboard" className="section">
       <div className="wrap">
         <div className="section-head">
-          <p className="eyebrow">My garage</p>
-          <h2>{garage ? garage.name : `Hi ${user.name.split(' ')[0]}, let's list your garage`}</h2>
+          <p className="eyebrow">{t('My garage')}</p>
+          <h2>{garage ? garage.name : tf("Hi {name}, let's list your garage", { name: user.name.split(' ')[0] })}</h2>
           <p className="muted">
             {garage
-              ? 'Accept bookings, chat with customers and keep them updated as the work moves along.'
-              : 'Answer a few quick questions and your garage appears in the directory. You can change your answers any time.'}
+              ? t('Accept bookings, chat with customers and keep them updated as the work moves along.')
+              : t('Answer a few quick questions and your garage appears in the directory. You can change your answers any time.')}
           </p>
         </div>
 
@@ -235,18 +236,18 @@ export default function GarageDashboard(props: {
           <div className="notice error" role="alert">
             {loadError}{' '}
             <button className="link" onClick={load}>
-              Try again
+              {t('Try again')}
             </button>
           </div>
         )}
 
         {!loading && garage && !editing && (
-          <div className="tabs" role="tablist" aria-label="Garage sections">
+          <div className="tabs" role="tablist" aria-label={t('Garage sections')}>
             <button role="tab" aria-selected={tab === 'appointments'} className={tab === 'appointments' ? 'on' : ''} onClick={() => setTab('appointments')}>
-              Appointments {unread > 0 && <span className="unread">{unread}</span>}
+              {t('Appointments')} {unread > 0 && <span className="unread">{unread}</span>}
             </button>
             <button role="tab" aria-selected={tab === 'profile'} className={tab === 'profile' ? 'on' : ''} onClick={() => setTab('profile')}>
-              Garage profile
+              {t('Garage profile')}
             </button>
           </div>
         )}
@@ -283,7 +284,7 @@ function ApprovalStatus(props: { garage: OwnerGarage; onTogglePublish: () => voi
   if (!garage.zip) {
     return (
       <div className="status draft" role="status">
-        Add your {cfg.postalLabel} so drivers nearby can find you. Choose <b>Edit my answers</b>, then <b>Where &amp; when</b>.
+        Add your {cfg.postalLabel} so drivers nearby can find you. Choose <b>{t('Edit my answers')}</b>, then <b>{t('Where & when')}</b>.
       </div>
     );
   }
@@ -298,12 +299,12 @@ function ApprovalStatus(props: { garage: OwnerGarage; onTogglePublish: () => voi
     return (
       <div className="status pending" role="status">
         {garage.published ? (
-          <>Waiting for approval. Our team is checking your garage; you will go live as soon as it is approved.</>
+          <>{t('Waiting for approval. Our team is checking your garage; you will go live as soon as it is approved.')}</>
         ) : (
-          <>Saved as a draft. Publish it to send it for approval.</>
+          <>{t('Saved as a draft. Publish it to send it for approval.')}</>
         )}
         <button className="btn btn-ghost" onClick={onTogglePublish}>
-          {garage.published ? 'Withdraw' : 'Submit for review'}
+          {garage.published ? 'Withdraw' : t('Submit for review')}
         </button>
       </div>
     );
@@ -312,13 +313,13 @@ function ApprovalStatus(props: { garage: OwnerGarage; onTogglePublish: () => voi
     <div className={`status ${garage.published ? 'live' : 'draft'}`} role="status">
       {garage.published ? (
         <>
-          <FaCheckCircle /> Approved and <b>live</b> in the directory.
+          <FaCheckCircle /> {t('Approved and live in the directory.')}
         </>
       ) : (
         <>Approved, but unpublished: customers can&apos;t see it.</>
       )}
       <button className="btn btn-ghost" onClick={onTogglePublish}>
-        {garage.published ? 'Unpublish' : 'Publish now'}
+        {garage.published ? t('Unpublish') : t('Publish now')}
       </button>
     </div>
   );
@@ -349,7 +350,7 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
       </div>
 
       <p className="page-link">
-        Your own web page: <a href={`/g/${garage.id}`} target="_blank" rel="noopener noreferrer">{window.location.origin}/g/{garage.id}</a>
+        {t('Your own web page:')} <a href={`/g/${garage.id}`} target="_blank" rel="noopener noreferrer">{window.location.origin}/g/{garage.id}</a>
         {garage.approval !== 'approved' || !garage.published ? <small className="hint"> (only you can see it until it is approved and published)</small> : null}
       </p>
 
@@ -359,11 +360,11 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
             Customers are sent to your website for prices: <a href={garage.website} target="_blank" rel="noopener noreferrer">{garage.website}</a>
           </>
         ) : (
-          <>Your services and prices are listed here on Garage Hub.</>
+          <>{t('Your services and prices are listed here on Garage Hub.')}</>
         )}
       </p>
 
-      <ul className="tags big" aria-label="Your services">
+      <ul className="tags big" aria-label={t('Your services')}>
         {garage.services.map((s) => (
           <li key={s.id}>
             {iconFor(s.id)} {s.name}
@@ -373,7 +374,7 @@ function MyGarageCard(props: { garage: OwnerGarage; onEdit: () => void; onToggle
       </ul>
 
       <button className="btn btn-primary" onClick={onEdit}>
-        Edit my answers
+        {t('Edit my answers')}
       </button>
     </div>
   );
@@ -455,7 +456,7 @@ function Wizard(props: {
 
   return (
     <div className="wizard">
-      <ol className="progress" aria-label="Setup progress">
+      <ol className="progress" aria-label={t('Setup progress')}>
         {STEPS.map((label, i) => (
           <li key={label} className={i === step ? 'current' : i < step ? 'done' : ''} aria-current={i === step ? 'step' : undefined}>
             <span>{i < step ? '✓' : i + 1}</span>
@@ -471,19 +472,19 @@ function Wizard(props: {
         {step === 0 && (
           <div className="qa">
             <label>
-              Garage name
-              <input value={a.name} onChange={(e) => set('name', e.target.value)} maxLength={80} autoFocus placeholder="e.g. Redline Auto Garage" />
-              <small className="hint">Shown as the title of your listing.</small>
+              {t('Garage name')}
+              <input value={a.name} onChange={(e) => set('name', e.target.value)} maxLength={80} autoFocus placeholder={t(cfg.country === 'US' ? 'e.g. Redline Auto Garage' : t('e.g. Navrang Auto Works'))} />
+              <small className="hint">{t('Shown as the title of your listing.')}</small>
             </label>
             <label>
-              Short tagline <small>(optional)</small>
+              {t('Short tagline')} <small>{t('(optional)')}</small>
               <input
                 value={a.tagline}
                 onChange={(e) => set('tagline', e.target.value)}
                 maxLength={140}
-                placeholder="e.g. Family-run since 1998, all makes and models"
+                placeholder={t('e.g. Family-run since 1998, all makes and models')}
               />
-              <small className="hint">One line, up to 140 characters. Appears under your name on the garage card.</small>
+              <small className="hint">{t('One line, up to 140 characters. Appears under your name on the garage card.')}</small>
             </label>
           </div>
         )}
@@ -492,11 +493,11 @@ function Wizard(props: {
           <div className="qa">
             <div className="two">
               <label>
-                City
-                <input value={a.city} onChange={(e) => set('city', e.target.value)} maxLength={60} autoFocus placeholder="e.g. Seattle" />
+                {t('City')}
+                <input value={a.city} onChange={(e) => set('city', e.target.value)} maxLength={60} autoFocus placeholder={t(cfg.country === 'US' ? 'e.g. Seattle' : t('e.g. Ahmedabad'))} />
               </label>
               <label>
-                {cfg.postalLabel}
+                {t(cfg.postalLabel)}
                 <input
                   value={a.zip}
                   onChange={(e) => set('zip', e.target.value.replace(/\D/g, '').slice(0, cfg.postalLength))}
@@ -505,41 +506,41 @@ function Wizard(props: {
                   placeholder={`e.g. ${postalExample()}`}
                   autoComplete="postal-code"
                 />
-                <small className="hint">Drivers within your area see you when they search this {cfg.postalLabel}.</small>
+                <small className="hint">{tp('Drivers within your area see you when they search this {postal}.')}</small>
               </label>
             </div>
             <div className="two">
               <label>
-                Street address
-                <input value={a.address} onChange={(e) => set('address', e.target.value)} maxLength={140} placeholder="e.g. 815 S Spokane St" autoComplete="street-address" />
+                {t('Street address')}
+                <input value={a.address} onChange={(e) => set('address', e.target.value)} maxLength={140} placeholder={t(cfg.country === 'US' ? 'e.g. 815 S Spokane St' : t('e.g. 12 CG Road'))} autoComplete="street-address" />
               </label>
               <label>
-                Neighbourhood <small>(optional)</small>
-                <input value={a.area} onChange={(e) => set('area', e.target.value)} maxLength={60} placeholder="e.g. Beacon Hill" />
+                {t('Neighbourhood')} <small>{t('(optional)')}</small>
+                <input value={a.area} onChange={(e) => set('area', e.target.value)} maxLength={60} placeholder={t(cfg.country === 'US' ? 'e.g. Beacon Hill' : t('e.g. Satellite'))} />
               </label>
             </div>
             <label>
-              Phone number
-              <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" placeholder={cfg.country === 'US' ? 'e.g. (206) 555-0142' : 'e.g. +91 98250 12345'} autoComplete="tel" />
-              <small className="hint">Customers call this number about their booking.</small>
+              {t('Phone number')}
+              <input value={a.phone} onChange={(e) => set('phone', e.target.value)} maxLength={25} inputMode="tel" placeholder={cfg.country === 'US' ? 'e.g. (206) 555-0142' : t('e.g. +91 98250 12345')} autoComplete="tel" />
+              <small className="hint">{t('Customers call this number about their booking.')}</small>
             </label>
             <fieldset className="hours">
-              <legend>Opening hours</legend>
+              <legend>{t('Opening hours')}</legend>
               <div className="three">
                 <label>
-                  Days
+                  {t('Days')}
                   <select value={hrs.days} onChange={(e) => setHours({ ...hrs, days: e.target.value })}>
-                    {DAY_OPTIONS.map((d) => <option key={d}>{d}</option>)}
+                    {DAY_OPTIONS.map((d) => <option key={d} value={d}>{t(d)}</option>)}
                   </select>
                 </label>
                 <label>
-                  Opens
+                  {t('Opens')}
                   <select value={hrs.open} onChange={(e) => setHours({ ...hrs, open: e.target.value })}>
                     {TIMES.map((t) => <option key={t}>{t}</option>)}
                   </select>
                 </label>
                 <label>
-                  Closes
+                  {t('Closes')}
                   <select value={hrs.close} onChange={(e) => setHours({ ...hrs, close: e.target.value })}>
                     {TIMES.map((t) => <option key={t}>{t}</option>)}
                   </select>
@@ -559,25 +560,25 @@ function Wizard(props: {
                 <input type="radio" name="mode" checked={a.mode === 'website'} onChange={() => set('mode', 'website')} />
                 <span>
                   <b>
-                    <FaExternalLinkAlt /> Send customers to my website
+                    <FaExternalLinkAlt /> {t('Send customers to my website')}
                   </b>
                   <small>
-                    You already publish your prices. Customers see your services here and click through to your site.
+                    {t('You already publish your prices. Customers see your services here and click through to your site.')}
                   </small>
                 </span>
               </label>
               <label className={`choice ${a.mode === 'listing' ? 'on' : ''}`}>
                 <input type="radio" name="mode" checked={a.mode === 'listing'} onChange={() => set('mode', 'listing')} />
                 <span>
-                  <b>List my services and prices here</b>
-                  <small>No website needed. Tell us what you offer and what it costs, and we show it to signed-in customers.</small>
+                  <b>{t('List my services and prices here')}</b>
+                  <small>{t('No website needed. Tell us what you offer and what it costs, and we show it to signed-in customers.')}</small>
                 </span>
               </label>
             </div>
             {a.mode === 'website' && (
               <label>
-                Website address
-                <small className="hint">The page where customers can see your prices.</small>
+                {t('Website address')}
+                <small className="hint">{t('The page where customers can see your prices.')}</small>
                 <input
                   type="url"
                   value={a.website}
@@ -594,7 +595,7 @@ function Wizard(props: {
         {step === 3 && (
           <div className="qa">
             <p className="muted">
-              {a.mode === 'listing' ? 'Tick the services you offer, then enter your starting price for each.' : 'Tick the services you offer.'}
+              {a.mode === 'listing' ? t('Tick the services you offer, then enter your starting price for each.') : t('Tick the services you offer.')}
             </p>
             <div className="chips">
               {catalog.map((c) => (
@@ -623,7 +624,7 @@ function Wizard(props: {
                         <input
                           value={s.name}
                           onChange={(e) => updateRow(s.key, { name: e.target.value })}
-                          placeholder="Service name"
+                          placeholder={t('Service name')}
                           aria-label="Custom service name"
                           maxLength={60}
                         />
@@ -637,7 +638,7 @@ function Wizard(props: {
                             inputMode="numeric"
                             value={s.price}
                             onChange={(e) => updateRow(s.key, { price: e.target.value.replace(/[^\d]/g, '') })}
-                            placeholder="from"
+                            placeholder={t('from')}
                             aria-label={`Price for ${s.name || 'custom service'}`}
                             maxLength={5}
                           />
@@ -647,7 +648,7 @@ function Wizard(props: {
                             inputMode="numeric"
                             value={s.discount}
                             onChange={(e) => updateRow(s.key, { discount: e.target.value.replace(/[^\d]/g, '').slice(0, 2) })}
-                            placeholder="off"
+                            placeholder={t('off')}
                             aria-label={`Discount percent for ${s.name || 'custom service'}`}
                             maxLength={2}
                           />
@@ -661,16 +662,16 @@ function Wizard(props: {
                       onChange={(e) => updateRow(s.key, { duration: e.target.value })}
                       aria-label={`Time for ${s.name || 'custom service'}`}
                     >
-                      <option value="">How long?</option>
+                      <option value="">{t('How long?')}</option>
                       {(s.duration && !DURATIONS.includes(s.duration) ? [s.duration, ...DURATIONS] : DURATIONS).map((d) => (
-                        <option key={d}>{d}</option>
+                        <option key={d} value={d}>{t(d)}</option>
                       ))}
                     </select>
                     {!s.id && (
                       <button
                         type="button"
                         className="icon-btn"
-                        aria-label="Remove service"
+                        aria-label={t('Remove service')}
                         onClick={() => set('services', a.services.filter((x) => x.key !== s.key))}
                       >
                         <FaTrash />
@@ -680,7 +681,7 @@ function Wizard(props: {
                       className="svc-desc"
                       value={s.description}
                       onChange={(e) => updateRow(s.key, { description: e.target.value })}
-                      placeholder="Describe this service in one line"
+                      placeholder={t('Describe this service in one line')}
                       aria-label={`Description for ${s.name || 'custom service'}`}
                       maxLength={160}
                     />
@@ -689,7 +690,7 @@ function Wizard(props: {
               </div>
             )}
             <button type="button" className="btn btn-outline add" onClick={addCustom}>
-              <FaPlus /> Add a service that isn&apos;t listed
+              <FaPlus /> {t("Add a service that isn't listed")}
             </button>
           </div>
         )}
@@ -697,7 +698,7 @@ function Wizard(props: {
         {step === 4 && (
           <div className="qa">
             <fieldset className="pay-methods">
-              <legend>How can customers pay you?</legend>
+              <legend>{t('How can customers pay you?')}</legend>
               {(Object.keys(api.PAY_LABELS) as PayMethod[]).map((m) => (
                 <label key={m} className="check">
                   <input
@@ -713,7 +714,7 @@ function Wizard(props: {
             </fieldset>
             {a.pay.methods.includes('online') && (
               <label>
-                Online payment link
+                {t('Online payment link')}
                 <input
                   type="url"
                   value={a.pay.link}
@@ -725,14 +726,14 @@ function Wizard(props: {
               </label>
             )}
             <label>
-              Payment note <small>(optional)</small>
+              {t('Payment note')} <small>{t('(optional)')}</small>
               <input
                 value={a.pay.note}
                 onChange={(e) => set('pay', { ...a.pay, note: e.target.value })}
                 maxLength={100}
-                placeholder={cfg.country === 'US' ? 'e.g. Zelle: 206 555 0142' : 'e.g. UPI: garage@upi'}
+                placeholder={cfg.country === 'US' ? 'e.g. Zelle: 206 555 0142' : t('e.g. UPI: garage@upi')}
               />
-              <small className="hint">Shown to the customer when they pay, for example transfer details.</small>
+              <small className="hint">{t('Shown to the customer when they pay, for example transfer details.')}</small>
             </label>
           </div>
         )}
@@ -740,8 +741,8 @@ function Wizard(props: {
         {step === 5 && (
           <div className="qa">
             <div>
-              <b>Colour</b>
-              <div className="swatches" role="group" aria-label="Accent colour">
+              <b>{t('Colour')}</b>
+              <div className="swatches" role="group" aria-label={t('Accent colour')}>
                 {['#ff6a1a', '#e11d48', '#2563eb', '#0d9488', '#16a34a', '#7c3aed', '#ca8a04', '#111827'].map((c) => (
                   <button
                     type="button"
@@ -757,48 +758,48 @@ function Wizard(props: {
                   type="color"
                   value={a.theme.accent}
                   onChange={(e) => set('theme', { ...a.theme, accent: e.target.value })}
-                  aria-label="Custom colour"
+                  aria-label={t('Custom colour')}
                   style={{ width: 44, height: 36, padding: 2 }}
                 />
               </div>
             </div>
             <div className="two">
               <div>
-                <b>Background</b>
-                <div className="seg" role="group" aria-label="Light or dark">
+                <b>{t('Background')}</b>
+                <div className="seg" role="group" aria-label={t('Light or dark')}>
                   {(['dark', 'light'] as const).map((m) => (
                     <button type="button" key={m} className={a.theme.mode === m ? 'on' : ''} onClick={() => set('theme', { ...a.theme, mode: m })}>
-                      {m === 'dark' ? 'Dark' : 'Light'}
+                      {m === 'dark' ? t('Dark') : t('Light')}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <b>Font style</b>
-                <div className="seg" role="group" aria-label="Font style">
+                <b>{t('Font style')}</b>
+                <div className="seg" role="group" aria-label={t('Font style')}>
                   {(['modern', 'classic', 'rounded'] as const).map((f) => (
                     <button type="button" key={f} className={a.theme.font === f ? 'on' : ''} onClick={() => set('theme', { ...a.theme, font: f })}>
-                      {f[0].toUpperCase() + f.slice(1)}
+                      {t(f[0].toUpperCase() + f.slice(1))}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
             <label>
-              Headline <small>(optional)</small>
+              {t('Headline')} <small>{t('(optional)')}</small>
               <input value={a.theme.headline} onChange={(e) => set('theme', { ...a.theme, headline: e.target.value })} maxLength={80} placeholder={a.name || 'e.g. Honest repairs, fair prices'} />
-              <small className="hint">Big text at the top of your page. Defaults to your garage name.</small>
+              <small className="hint">{t('Big text at the top of your page. Defaults to your garage name.')}</small>
             </label>
             <label>
-              About your garage <small>(optional)</small>
-              <input value={a.theme.about} onChange={(e) => set('theme', { ...a.theme, about: e.target.value })} maxLength={200} placeholder="e.g. Family-run since 1998, all makes and models" />
-              <small className="hint">One or two sentences under the headline, up to 200 characters.</small>
+              {t('About your garage')} <small>{t('(optional)')}</small>
+              <input value={a.theme.about} onChange={(e) => set('theme', { ...a.theme, about: e.target.value })} maxLength={200} placeholder={t('e.g. Family-run since 1998, all makes and models')} />
+              <small className="hint">{t('One or two sentences under the headline, up to 200 characters.')}</small>
             </label>
-            <div className="site theme-preview" style={themeVars(a.theme)} aria-label="Preview of your page">
+            <div className="site theme-preview" style={themeVars(a.theme)} aria-label={t('Preview of your page')}>
               <div className="site-hero" style={{ padding: '28px 22px' }}>
-                <h1 style={{ fontSize: '1.7rem' }}>{a.theme.headline || a.name || 'Your garage'}</h1>
-                <p className="s-lead" style={{ fontSize: '.95rem' }}>{a.theme.about || a.tagline || 'Your short description appears here.'}</p>
-                <span className="site-btn">See our services</span>
+                <h1 style={{ fontSize: '1.7rem' }}>{a.theme.headline || a.name || t('Your garage')}</h1>
+                <p className="s-lead" style={{ fontSize: '.95rem' }}>{a.theme.about || a.tagline || t('Your short description appears here.')}</p>
+                <span className="site-btn">{t('See our services')}</span>
               </div>
             </div>
           </div>
@@ -807,21 +808,21 @@ function Wizard(props: {
         {step === 6 && (
           <div className="qa review">
             <dl>
-              <dt>Garage</dt>
+              <dt>{t('Garage')}</dt>
               <dd>{a.name}</dd>
-              <dt>Location</dt>
+              <dt>{t('Location')}</dt>
               <dd>
                 {fullAddress(a)} {a.zip}
               </dd>
-              <dt>Phone &amp; hours</dt>
+              <dt>{t('Phone & hours')}</dt>
               <dd>
                 {a.phone} &middot; {a.hours}
               </dd>
-              <dt>Prices</dt>
-              <dd>{a.mode === 'website' ? `Customers are sent to ${a.website}` : 'Listed here on Garage Hub'}</dd>
-              <dt>Payment</dt>
+              <dt>{t('Prices')}</dt>
+              <dd>{a.mode === 'website' ? `Customers are sent to ${a.website}` : t('Listed here on Garage Hub')}</dd>
+              <dt>{t('Payment')}</dt>
               <dd>{a.pay.methods.map((m: PayMethod) => api.PAY_LABELS[m]).join(', ')}</dd>
-              <dt>Services</dt>
+              <dt>{t('Services')}</dt>
               <dd>
                 {a.services
                   .map((s) => `${s.name}${a.mode === 'listing' ? ` (${money(Number(s.price))}${s.discount ? `, ${s.discount}% off` : ''})` : ''}`)
@@ -831,7 +832,7 @@ function Wizard(props: {
             <p className="muted">
               {isNew || !wasPublished
                 ? 'After you publish, our team checks your garage. Once approved, it appears for drivers in your area. You can edit it any time.'
-                : 'You are live. Changes are saved straight away.'}
+                : t('You are live. Changes are saved straight away.')}
             </p>
           </div>
         )}
@@ -845,28 +846,28 @@ function Wizard(props: {
         <div className="wizard-actions">
           {step > 0 ? (
             <button className="btn btn-ghost" onClick={() => { setError(null); setStep(step - 1); }} disabled={busy}>
-              Back
+              {t('Back')}
             </button>
           ) : onCancel ? (
             <button className="btn btn-ghost" onClick={onCancel}>
-              Cancel
+              {t('Cancel')}
             </button>
           ) : (
             <span />
           )}
           {step < STEPS.length - 1 ? (
             <button className="btn btn-primary" onClick={next}>
-              Next
+              {t('Next')}
             </button>
           ) : (
             <div className="end-actions">
               {(isNew || !wasPublished) && (
                 <button className="btn btn-outline" onClick={() => save(false)} disabled={busy}>
-                  Save as draft
+                  {t('Save as draft')}
                 </button>
               )}
               <button className="btn btn-primary" onClick={() => save(true)} disabled={busy}>
-                {busy ? 'Saving...' : wasPublished ? 'Save & keep live' : 'Submit for review'}
+                {busy ? 'Saving...' : wasPublished ? t('Save & keep live') : t('Submit for review')}
               </button>
             </div>
           )}

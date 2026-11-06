@@ -12,7 +12,7 @@ import {
   FaWrench,
 } from 'react-icons/fa';
 import * as api from './api';
-import { LANGS, lang, setLang, t, tf } from './i18n';
+import { LANGS, lang, setLang, t, tf, tp } from './i18n';
 import { cfg, postalExample, postalRe } from './config';
 import type { GarageDetail, GarageSummary, Range, User, Where } from './api';
 import { AppointmentsWorkspace, BookingForm } from './Appointments';
@@ -236,7 +236,7 @@ export default function App({ home }: { home: 'driver' | 'owner' }) {
               <div className="section-head">
                 <p className="eyebrow">{t('My bookings')}</p>
                 <h2>{t('Your appointments')}</h2>
-                <p className="muted">Track each booking, chat with the garage and see updates as your car is worked on.</p>
+                <p className="muted">{t('Track each booking, chat with the garage and see updates as your car is worked on.')}</p>
               </div>
               <AppointmentsWorkspace
                 role="customer"
@@ -267,9 +267,9 @@ export default function App({ home }: { home: 'driver' | 'owner' }) {
       </main>
       <footer className="footer">
         <div className="wrap">
-          <span>&copy; {new Date().getFullYear()} Garage Hub. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} Garage Hub. {t('All rights reserved.')}</span>
           {home === 'driver' ? <a href="/owners">{t('Own a garage? For garage owners')}</a> : <a href="/">{t('Looking for a garage?')}</a>}
-          <span>Demo site: sample garages, contact details and prices.</span>
+          <span>{t('Demo site: sample garages, contact details and prices.')}</span>
         </div>
       </footer>
       {authMode && (
@@ -339,7 +339,7 @@ function Header(props: {
                 </div>
               ) : (
                 <span className="role-tag">
-                  Garage owner
+                  {t('Garage owner')}
                   {unread.garage > 0 && <span className="unread" aria-label={`${unread.garage} unread`}>{unread.garage}</span>}
                 </span>
               )}
@@ -485,7 +485,7 @@ function TrustStrip() {
  */
 function detectZip(): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator)) return reject(new Error('Your browser can\'t share its location.'));
+    if (!('geolocation' in navigator)) return reject(new Error("Your browser can't share its location."));
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
@@ -497,19 +497,19 @@ function detectZip(): Promise<string> {
           const data = (await r.json()) as { address?: { postcode?: string; country_code?: string } };
           const zip = new RegExp(`\\b\\d{${cfg.postalLength}}\\b`).exec((data.address?.postcode ?? '').replace(/\s/g, ' ').replace(/(\d{3}) (\d{3})/, '$1$2'))?.[0];
           if (!zip || (data.address?.country_code && data.address.country_code !== cfg.country.toLowerCase())) {
-            return reject(new Error(`We could only find a ${cfg.postalLabel} for locations in ${cfg.country === 'US' ? 'the US' : 'India'}.`));
+            return reject(new Error(tp(`We could only find a {postal} for locations in ${cfg.country === 'US' ? 'the US' : 'India'}.`)));
           }
           resolve(zip);
         } catch {
-          reject(new Error(`Could not work out your ${cfg.postalLabel} from your location.`));
+          reject(new Error(tp('Could not work out your {postal} from your location.')));
         }
       },
       (err) =>
         reject(
           new Error(
             err.code === err.PERMISSION_DENIED
-              ? 'Location access is blocked in your browser.'
-              : 'Could not get your location.',
+              ? t('Location access is blocked in your browser.')
+              : t('Could not get your location.'),
           ),
         ),
       { timeout: 10000, maximumAge: 10 * 60 * 1000 },
@@ -536,7 +536,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
         onWhere({ zip: found, range });
       } catch (e) {
         // Automatic attempts fail quietly into manual entry; a button press explains what went wrong.
-        setNote(`${e instanceof Error ? e.message : 'Could not detect your location.'} Please enter your ${cfg.postalLabel}.`);
+        setNote(`${t(e instanceof Error ? e.message : t('Could not detect your location.'))} ${tp('Please enter your {postal}.')}`);
         if (auto) document.getElementById('zip-input')?.focus();
       } finally {
         setDetecting(false);
@@ -554,7 +554,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!postalRe().test(zip)) return setError(`Enter a ${cfg.postalLength}-digit ${cfg.postalLabel}.`);
+    if (!postalRe().test(zip)) return setError(tp('Enter a {n}-digit {postal}.'));
     setError(null);
     onWhere({ zip, range });
   };
@@ -562,7 +562,7 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
   return (
     <form className="location-bar" onSubmit={submit} noValidate>
       <label>
-        Your {cfg.postalLabel}
+        {tp('Your {postal}')}
         <span className="loc-input">
           <FaMapMarkerAlt aria-hidden="true" />
           <input
@@ -572,24 +572,24 @@ function LocationBar(props: { where: Where | null; onWhere: (w: Where) => void }
             autoComplete="postal-code"
             maxLength={cfg.postalLength}
             placeholder={`e.g. ${postalExample()}`}
-            aria-label={`Your ${cfg.postalLabel}`}
+            aria-label={tp('Your {postal}')}
             id="zip-input"
           />
         </span>
       </label>
       <label>
         {t('How far?')}
-        <select value={range} onChange={(e) => setRange(e.target.value as Range)} aria-label="How far to search">
-          <option value="exact">Only my {cfg.postalLabel}</option>
-          <option value="near">Around my {cfg.postalLabel}</option>
-          <option value="wide">My wider area</option>
+        <select value={range} onChange={(e) => setRange(e.target.value as Range)} aria-label={t('How far to search')}>
+          <option value="exact">{tp('Only my {postal}')}</option>
+          <option value="near">{tp('Around my {postal}')}</option>
+          <option value="wide">{t('My wider area')}</option>
         </select>
       </label>
       <button type="submit" className="btn btn-primary">
         {t('Find garages')}
       </button>
       <button type="button" className="btn btn-outline loc-btn" onClick={() => void detect(false)} disabled={detecting}>
-        <FaLocationArrow aria-hidden="true" /> {detecting ? 'Finding you...' : 'Use my location'}
+        <FaLocationArrow aria-hidden="true" /> {detecting ? 'Finding you...' : t('Use my location')}
       </button>
       {note && <span className="loc-note" role="status">{note}</span>}
       {error && (
@@ -641,8 +641,8 @@ function GaragesSection(props: {
           <p className="eyebrow">{t('Garages near you')}</p>
           <h2>{t('Choose a garage')}</h2>
           <p className="muted">
-            Enter your {cfg.postalLabel} to see garages in your area.{' '}
-            {user ? 'Pick one to see its services and pricing.' : 'Sign in to see their services and pricing.'}
+            {tp('Enter your {postal} to see garages in your area.')}{' '}
+            {user ? 'Pick one to see its services and pricing.' : t('Sign in to see their services and pricing.')}
           </p>
         </div>
 
@@ -650,7 +650,7 @@ function GaragesSection(props: {
 
         {!where && (
           <p className="muted empty">
-            Type your {cfg.postalLabel} above and we&apos;ll show only the garages around you.
+            {tp("Type your {postal} above and we'll show only the garages around you.")}
           </p>
         )}
 
@@ -667,7 +667,7 @@ function GaragesSection(props: {
               aria-label={t('Search garages')}
             />
           </label>
-          <div className="chips" role="group" aria-label="Filter by service">
+          <div className="chips" role="group" aria-label={t('Filter by service')}>
             <button className={`chip ${serviceFilter === null ? 'on' : ''}`} onClick={() => setServiceFilter(null)}>
               {t('All services')}
             </button>
@@ -707,7 +707,7 @@ function GaragesSection(props: {
             {where.range !== 'wide' ? ' Try a wider area above.' : ' Know a garage here? Ask them to list it on Garage Hub.'}
           </p>
         )}
-        {garages && garages.length > 0 && visible.length === 0 && <p className="muted empty">No garages match your search. Try clearing a filter.</p>}
+        {garages && garages.length > 0 && visible.length === 0 && <p className="muted empty">{t('No garages match your search. Try clearing a filter.')}</p>}
 
         {garages && visible.length > 0 && (
           <div className="garage-grid">
@@ -727,7 +727,7 @@ function GaragesSection(props: {
                 <p className="open-hours">
                   <FaClock /> {g.hours}
                 </p>
-                <ul className="tags" aria-label="Services offered">
+                <ul className="tags" aria-label={t('Services offered')}>
                   {g.serviceIds.map((id, i) => (
                     <li key={id} className={id === serviceFilter ? 'match' : ''}>
                       {iconFor(id)} {g.serviceNames[i]}
@@ -751,7 +751,7 @@ function GaragesSection(props: {
 
 function Process() {
   const steps = [
-    { n: '1', t: `Enter your ${cfg.postalLabel}`, d: `Share your location or type your ${cfg.postalLabel} to see garages near you.` },
+    { n: '1', t: tp('Enter your {postal}'), d: tp('Share your location or type your {postal} to see garages near you.') },
     { n: '2', t: t('Choose a garage'), d: t('Open its page, read its services and reviews, then sign in to see prices.') },
     { n: '3', t: t('Book and chat'), d: t('Pick a time, then follow the job and message the garage as it goes.') },
     { n: '4', t: t('Collect, pay, review'), d: t('Pick up your car, pay the garage, and rate your experience.') },
@@ -780,18 +780,18 @@ function Process() {
 /** Front page for garage owners: only garage options, no driver directory. */
 function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
   const benefits = [
-    ['Your own web page', 'A page you can use as your website, with your colours, headline, services and hours.'],
-    ['Online bookings', 'Drivers book a time, you accept, and you chat with them about the job.'],
-    ['Clear job tracking', 'Booked, car at the garage, work in progress, completed, picked up. Customers see every step.'],
-    ['Offers and discounts', 'Put a percentage off on the services you want to promote.'],
-    ['Get paid your way', 'Accept cash, card at the garage, transfer, or send customers to your own payment link.'],
-    ['Reviews that build trust', 'Drivers rate you after the job, and your average shows on your page and in search.'],
+    [t('Your own web page'), t('A page you can use as your website, with your colours, headline, services and hours.')],
+    [t('Online bookings'), t('Drivers book a time, you accept, and you chat with them about the job.')],
+    [t('Clear job tracking'), t('Booked, car at the garage, work in progress, completed, picked up. Customers see every step.')],
+    [t('Offers and discounts'), t('Put a percentage off on the services you want to promote.')],
+    [t('Get paid your way'), t('Accept cash, card at the garage, transfer, or send customers to your own payment link.')],
+    [t('Reviews that build trust'), t('Drivers rate you after the job, and your average shows on your page and in search.')],
   ];
   const steps = [
-    ['Register', 'Create a garage owner account.'],
-    ['Answer a few questions', `Name, ${cfg.postalLabel}, hours, services, prices and how you want your page to look.`],
-    ['We approve it', 'Our team checks new garages, usually within a day.'],
-    ['Go live', `Drivers near your ${cfg.postalLabel} can find you and book.`],
+    [t('Register'), t('Create a garage owner account.')],
+    [t('Answer a few questions'), tp('Name, {postal}, hours, services, prices and how you want your page to look.')],
+    [t('We approve it'), t('Our team checks new garages, usually within a day.')],
+    [t('Go live'), tp('Drivers near your {postal} can find you and book.')],
   ];
   return (
     <>
@@ -800,13 +800,12 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
           <div>
             <p className="eyebrow">{t('For garage owners')}</p>
             <h1>
-              Your garage, online
+              {t('Your garage, online')}
               <br />
-              <span className="accent">in minutes.</span>
+              <span className="accent">{t('in minutes.')}</span>
             </h1>
             <p className="lead">
-              Get listed for drivers in your area, take bookings, keep customers updated and get paid, all from one
-              dashboard. Your garage also gets its own web page.
+              {t('Get listed for drivers in your area, take bookings, keep customers updated and get paid, all from one dashboard. Your garage also gets its own web page.')}
             </p>
             <div className="cta-row">
               <button className="btn btn-primary btn-lg" onClick={() => onAuth('signup')}>
@@ -824,7 +823,7 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
         <div className="wrap">
           <div className="section-head">
             <p className="eyebrow">{t('Why Garage Hub')}</p>
-            <h2>Everything a garage needs</h2>
+            <h2>{t('Everything a garage needs')}</h2>
           </div>
           <ul className="benefit-grid">
             {benefits.map(([t, d]) => (
@@ -840,7 +839,7 @@ function OwnerHome({ onAuth }: { onAuth: (m: AuthMode) => void }) {
         <div className="wrap">
           <div className="section-head">
             <p className="eyebrow">{t('How it works')}</p>
-            <h2>Live in four steps</h2>
+            <h2>{t('Live in four steps')}</h2>
           </div>
           <ol className="steps">
             {steps.map(([t, d], i) => (
@@ -894,7 +893,7 @@ function AuthModal(props: {
         : await api.login(email.trim(), password, role);
       onAuthed(res.token, res.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(err instanceof Error ? err.message : t('Something went wrong.'));
     } finally {
       setBusy(false);
     }
@@ -915,7 +914,7 @@ function AuthModal(props: {
         <h2 id="auth-title">{isSignup ? (isGarage ? t('Register your garage') : t('Create your account')) : t('Welcome back')}</h2>
         <p className="muted">{isSignup ? `Sign up ${reason}.` : `Log in ${reason}.`}</p>
         <p className="one-account">
-          {isGarage ? 'This is the garage owner login. Looking for a garage? Use the driver site.' : 'This is the driver login. Own a garage? Use the garage owner site.'}
+          {isGarage ? 'This is the garage owner login. Looking for a garage? Use the driver site.' : t('This is the driver login. Own a garage? Use the garage owner site.')}
         </p>
         <form onSubmit={submit} noValidate>
           {isSignup && (

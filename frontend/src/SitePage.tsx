@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { FaClock, FaCreditCard, FaExternalLinkAlt, FaMapMarkerAlt, FaPhoneAlt } from 'react-icons/fa';
-import { t } from './i18n';
+import { t, tf } from './i18n';
 import * as api from './api';
 import type { GarageDetail, SiteData } from './api';
 import { BookingForm } from './Appointments';
@@ -35,10 +35,10 @@ export function themeVars(t: api.Theme): CSSProperties {
 }
 
 const SITE_STEPS = [
-  ['Book online', 'Pick your services and a time that suits you.'],
-  ['Drop off your car', 'We confirm your booking and keep you updated by chat.'],
-  ['We do the work', 'Follow each step: car at the garage, work in progress, completed.'],
-  ['Collect and pay', 'Pick up your car and pay the way you prefer.'],
+  [t('Book online'), t('Pick your services and a time that suits you.')],
+  [t('Drop off your car'), t('We confirm your booking and keep you updated by chat.')],
+  [t('We do the work'), t('Follow each step: car at the garage, work in progress, completed.')],
+  [t('Collect and pay'), t('Pick up your car and pay the way you prefer.')],
 ];
 
 /** A garage's own page at /g/{id}. Owners can use it as their website; the look comes from their theme. */
@@ -57,7 +57,7 @@ export default function SitePage({ id }: { id: string }) {
     if (api.getToken()) api.fetchGarage(id).then((r) => setDetail(r.garage)).catch(() => undefined);
   }, [id]);
 
-  if (error) return <div className="site" style={themeVars(api.DEFAULT_THEME)}><div className="site-wrap"><h1>Garage not found</h1><p className="s-muted">{error}</p><a href="/">Browse all garages</a></div></div>;
+  if (error) return <div className="site" style={themeVars(api.DEFAULT_THEME)}><div className="site-wrap"><h1>{t('Garage not found')}</h1><p className="s-muted">{error}</p><a href="/">{t('Browse all garages')}</a></div></div>;
   if (!site) return <div className="site" style={themeVars(api.DEFAULT_THEME)} aria-busy="true" />;
 
   const th = site.theme;
@@ -69,7 +69,7 @@ export default function SitePage({ id }: { id: string }) {
   const bookTarget = detail && !detail.mine && site.live ? '#book' : signedIn ? '#services' : `/?garage=${encodeURIComponent(site.id)}`;
   return (
     <div className="site" style={themeVars(th)}>
-      {!site.live && <div className="site-banner">Preview: only you can see this page until it is approved and published.</div>}
+      {!site.live && <div className="site-banner">{t('Preview: only you can see this page until it is approved and published.')}</div>}
       <header className="site-top">
         <div className="site-wrap site-top-in">
           <b className="site-name">{site.name}</b>
@@ -88,12 +88,12 @@ export default function SitePage({ id }: { id: string }) {
           <p className="s-lead">{th.about || site.tagline}</p>
           <div className="site-hero-actions">
             <a className="site-btn" href={bookTarget}>{t('Book an appointment')}</a>
-            <a className="site-btn ghost" href={tel}>Call {site.phone}</a>
+            <a className="site-btn ghost" href={tel}>{tf('Call {phone}', { phone: site.phone })}</a>
           </div>
         </div>
       </section>
 
-      <section className="site-trust site-wrap" aria-label="At a glance">
+      <section className="site-trust site-wrap" aria-label={t('At a glance')}>
         <div><b><Stars rating={site.rating} reviews={site.reviews} /></b><span>{t('Rated by drivers')}</span></div>
         <div><b><FaClock /> {site.hours}</b><span>{t('Opening hours')}</span></div>
         <div><b><FaMapMarkerAlt /> {site.area || site.city}</b><span>{site.address}</span></div>
@@ -116,7 +116,7 @@ export default function SitePage({ id }: { id: string }) {
                   {sv.duration && <span className="s-muted"><FaClock /> {sv.duration}</span>}
                   {!toWebsite && p && p.price > 0 && (
                     <b>
-                      {sv.discount > 0 && <s className="s-muted">{money(p.price)}</s>} from {money(p.finalPrice)}
+                      {sv.discount > 0 && <s className="s-muted">{money(p.price)}</s>} {tf('from {price}', { price: money(p.finalPrice) })}
                     </b>
                   )}
                 </div>
@@ -126,7 +126,7 @@ export default function SitePage({ id }: { id: string }) {
         </ul>
         {toWebsite && detail?.website && isHttpUrl(detail.website) && (
           <a className="site-btn" href={detail.website} target="_blank" rel="noopener noreferrer">
-            See prices on our website <FaExternalLinkAlt />
+            {t('See prices on our website')} <FaExternalLinkAlt />
           </a>
         )}
         {!signedIn && !toWebsite && (
@@ -144,7 +144,7 @@ export default function SitePage({ id }: { id: string }) {
           </div>
         </section>
       )}
-      {detail?.mine && <p className="site-wrap s-muted">This is your page. Customers book from here once it is live.</p>}
+      {detail?.mine && <p className="site-wrap s-muted">{t('This is your page. Customers book from here once it is live.')}</p>}
 
       <section className="site-wrap site-sec">
         <h2>{t('How it works')}</h2>
@@ -183,7 +183,7 @@ export default function SitePage({ id }: { id: string }) {
 
       <footer className="site-foot">
         <div className="site-wrap">
-          &copy; {new Date().getFullYear()} {site.name} &middot; Bookings by <a href="/">Garage Hub</a>
+          &copy; {new Date().getFullYear()} {site.name} &middot; {t('Bookings by')} <a href="/">Garage Hub</a>
           <span className="site-share no-print">
             {' '}&middot; <a href={`https://wa.me/?text=${encodeURIComponent(`${site.name}: ${pageUrl}`)}`} target="_blank" rel="noreferrer">{t('Share on WhatsApp')}</a>
             {detail?.mine && <> &middot; <button type="button" className="link" onClick={() => setPoster(true)}>{t('Print a QR poster')}</button></>}

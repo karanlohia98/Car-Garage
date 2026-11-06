@@ -21,7 +21,7 @@ export async function loadConfig(): Promise<void> {
 
 export const money = (n: number): string => `${cfg.currency}${Math.round(n).toLocaleString(cfg.locale)}`;
 export const postalRe = (): RegExp => new RegExp(`^\\d{${cfg.postalLength}}$`);
-export const postalExample = (): string => (cfg.country === 'US' ? '98108' : '380009');
+export const postalExample = (): string => (cfg.country === 'US' ? '98108' : '380015');
 
 /** A click-to-chat WhatsApp link (works without any account setup). Returns '' if the number is unusable. */
 export function waLink(phone: string, text: string): string {
